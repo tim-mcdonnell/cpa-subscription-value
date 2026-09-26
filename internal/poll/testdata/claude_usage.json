@@ -1,0 +1,59 @@
+{
+  "five_hour": {
+    "utilization": 42,
+    "resets_at": "2026-09-26T17:00:00.412855+00:00"
+  },
+  "seven_day": {
+    "utilization": 18,
+    "resets_at": "2026-10-01T04:00:00.412876+00:00"
+  },
+  "seven_day_oauth_apps": null,
+  "seven_day_opus": null,
+  "seven_day_sonnet": {
+    "utilization": 3,
+    "resets_at": "2026-10-01T04:00:00.412876+00:00"
+  },
+  "seven_day_cowork": null,
+  "iguana_necktie": null,
+  "extra_usage": {
+    "is_enabled": false,
+    "monthly_limit": null,
+    "used_credits": null,
+    "utilization": null,
+    "currency": "USD"
+  },
+  "limits": [
+    {
+      "kind": "session",
+      "group": null,
+      "percent": 42,
+      "resets_at": "2026-09-26T17:00:00.412855+00:00",
+      "is_active": true,
+      "scope": null
+    },
+    {
+      "kind": "weekly_all",
+      "group": null,
+      "percent": 18,
+      "resets_at": "2026-10-01T04:00:00.412876+00:00",
+      "is_active": false,
+      "scope": null
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "models",
+      "percent": 7,
+      "resets_at": "2026-10-01T04:00:00.412876+00:00",
+      "is_active": true,
+      "scope": {"model": {"id": "claude-fable-5", "display_name": "Fable"}}
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "models",
+      "percent": 0,
+      "resets_at": null,
+      "is_active": false,
+      "scope": {"model": {"id": "claude-sonnet-4-5", "display_name": "Sonnet 4.5"}}
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/config"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/ingest"
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/poll"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/store"
 )
 
@@ -39,6 +41,10 @@ type App struct {
 	writerWG sync.WaitGroup
 	stop     chan struct{}
 	running  bool
+
+	// background cancels the pollers and other periodic work.
+	background context.CancelFunc
+	bgWG       sync.WaitGroup
 
 	queued      atomic.Int64
 	dropped     atomic.Int64
@@ -115,9 +121,12 @@ func (a *App) register(payload []byte) ([]byte, error) {
 func (a *App) applyConfigLocked(cfg config.Config) error {
 	if a.store != nil && a.cfg.DataDir == cfg.DataDir {
 		a.cfg = cfg
+		a.stopBackgroundLocked()
+		a.startBackgroundLocked()
 		return nil
 	}
 	if a.store != nil {
+		a.stopBackgroundLocked()
 		a.stopWriterLocked()
 		_ = a.store.Close()
 		a.store = nil
@@ -134,6 +143,7 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 	}
 	_ = st.SetSetting("plugin_started_at", a.startedAt)
 	a.startWriterLocked()
+	a.startBackgroundLocked()
 	a.log("info", "plugin registered", map[string]any{"version": a.version, "schema": a.schema, "data_dir": cfg.DataDir})
 	return nil
 }
@@ -164,10 +174,38 @@ func (a *App) stopWriterLocked() {
 	a.mu.Lock()
 }
 
+// startBackgroundLocked launches the pollers when polling is enabled. The
+// host is required: without one there are no credentials to poll with.
+func (a *App) startBackgroundLocked() {
+	if a.background != nil || a.host == nil || a.cfg.PollInterval() <= 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.background = cancel
+	p := poll.New(a.store, a.host, a.log, a.cfg.PollInterval())
+	a.bgWG.Add(1)
+	go func() {
+		defer a.bgWG.Done()
+		p.Run(ctx)
+	}()
+}
+
+func (a *App) stopBackgroundLocked() {
+	if a.background == nil {
+		return
+	}
+	a.background()
+	a.background = nil
+	a.mu.Unlock()
+	a.bgWG.Wait()
+	a.mu.Lock()
+}
+
 // Shutdown drains the ingest queue and closes the store. Safe to call twice.
 func (a *App) Shutdown() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.stopBackgroundLocked()
 	a.stopWriterLocked()
 	if a.store != nil {
 		_ = a.store.Close()

@@ -1,0 +1,53 @@
+{
+  "plan_type": "pro",
+  "rate_limit": {
+    "allowed": true,
+    "limit_reached": false,
+    "primary_window": {
+      "used_percent": 37,
+      "limit_window_seconds": 18000,
+      "reset_after_seconds": 9000,
+      "reset_at": 1790000000
+    },
+    "secondary_window": {
+      "used_percent": 12,
+      "limit_window_seconds": 604800,
+      "reset_after_seconds": 400000,
+      "reset_at": 1790400000
+    }
+  },
+  "code_review_rate_limit": {
+    "allowed": true,
+    "limit_reached": false,
+    "primary_window": {
+      "used_percent": 0,
+      "limit_window_seconds": 604800,
+      "reset_after_seconds": 604800,
+      "reset_at": 1790604800
+    },
+    "secondary_window": null
+  },
+  "additional_rate_limits": [
+    {
+      "limit_name": "codex_bengalfox",
+      "metered_feature": "codex_bengalfox",
+      "rate_limit": {
+        "allowed": false,
+        "limit_reached": true,
+        "primary_window": {
+          "used_percent": 100,
+          "limit_window_seconds": 18000,
+          "reset_after_seconds": 1000,
+          "reset_at": 1790001000
+        },
+        "secondary_window": {
+          "used_percent": 45,
+          "limit_window_seconds": 604800,
+          "reset_after_seconds": 400000,
+          "reset_at": 1790400000
+        }
+      }
+    }
+  ],
+  "credits": {"has_credits": false, "unlimited": false, "balance": "0"}
+}

@@ -94,6 +94,13 @@ func TestLifecycleRoundTrip(t *testing.T) {
 	if got := body.Events[0]["uncached_input"]; got != float64(1200) {
 		t.Fatalf("uncached_input %v", got)
 	}
+	// The built-in price table knows Opus 5.5, so ingest froze a real cost.
+	if usd, _ := body.Events[0]["api_usd"].(float64); usd <= 0 {
+		t.Fatalf("api_usd %v; event %v", usd, body.Events[0])
+	}
+	if hash, _ := body.Events[0]["price_hash"].(string); hash == "" {
+		t.Fatalf("price_hash empty")
+	}
 
 	rreq, _ := json.Marshal(abi.ManagementRequest{Method: "GET", Path: "/" + PluginID + "/readings", Query: map[string][]string{"auth_index": {"0a1b2c3d"}, "meter": {"7d"}}})
 	res = mustEnvelope(t, a, abi.MethodManagementHandle, rreq)

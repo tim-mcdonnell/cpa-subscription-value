@@ -16,6 +16,7 @@ import (
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/ingest"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/poll"
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/pricing"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/store"
 )
 
@@ -33,6 +34,7 @@ type App struct {
 	store     *store.Store
 	router    *api.Router
 	pricer    ingest.Pricer
+	catalog   *pricing.Catalog
 	startedAt time.Time
 
 	// ingest is the hand-off between HandleUsage (must return fast) and the
@@ -122,6 +124,11 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 	if a.store != nil && a.cfg.DataDir == cfg.DataDir {
 		a.cfg = cfg
 		a.stopBackgroundLocked()
+		a.catalog = pricing.NewCatalog(a.store, cfg, a.host, a.log)
+		if err := a.catalog.Load(); err != nil {
+			a.log("warn", "load price snapshot failed; using built-in table", map[string]any{"error": err.Error()})
+		}
+		a.pricer = a.catalog
 		a.startBackgroundLocked()
 		return nil
 	}
@@ -137,6 +144,11 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 	}
 	a.cfg = cfg
 	a.store = st
+	a.catalog = pricing.NewCatalog(st, cfg, a.host, a.log)
+	if err := a.catalog.Load(); err != nil {
+		a.log("warn", "load price snapshot failed; using built-in table", map[string]any{"error": err.Error()})
+	}
+	a.pricer = a.catalog
 	a.router = api.New(PluginID, storeShim{st}, a.health)
 	if a.startedAt.IsZero() {
 		a.startedAt = time.Now()
@@ -174,20 +186,30 @@ func (a *App) stopWriterLocked() {
 	a.mu.Lock()
 }
 
-// startBackgroundLocked launches the pollers when polling is enabled. The
-// host is required: without one there are no credentials to poll with.
+// startBackgroundLocked launches the pollers and the price sync. Polling
+// needs a host (credentials come from it); price sync does not.
 func (a *App) startBackgroundLocked() {
-	if a.background != nil || a.host == nil || a.cfg.PollInterval() <= 0 {
+	if a.background != nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.background = cancel
-	p := poll.New(a.store, a.host, a.log, a.cfg.PollInterval())
-	a.bgWG.Add(1)
-	go func() {
-		defer a.bgWG.Done()
-		p.Run(ctx)
-	}()
+	if a.host != nil && a.cfg.PollInterval() > 0 {
+		p := poll.New(a.store, a.host, a.log, a.cfg.PollInterval())
+		a.bgWG.Add(1)
+		go func() {
+			defer a.bgWG.Done()
+			p.Run(ctx)
+		}()
+	}
+	if a.cfg.PriceSyncHours > 0 {
+		c := a.catalog
+		a.bgWG.Add(1)
+		go func() {
+			defer a.bgWG.Done()
+			c.RunSync(ctx, time.Duration(a.cfg.PriceSyncHours)*time.Hour)
+		}()
+	}
 }
 
 func (a *App) stopBackgroundLocked() {

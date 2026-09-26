@@ -39,7 +39,8 @@ type genCfg struct {
 	typ       map[TokenType]float64
 	constant  bool      // every segment has the same mix
 	cacheBase []float64 // per-cycle mean cache-read share of context
-	outBase   []float64 // per-cycle mean output/context ratio
+	outBase   []float64 // per-cycle mean output/context ratio (±40 % within a cycle)
+	crSpread  float64   // half-width of the within-cycle cache-read share (default 0.35)
 	noise     float64   // Gaussian SD of observed Δ, in ticks
 }
 
@@ -71,9 +72,13 @@ func generate(cfg genCfg) ([]Segment, time.Time) {
 			}
 			if !cfg.constant {
 				pSonnet = u(0.05, 0.65)
-				cr = math.Max(0.05, math.Min(0.95, u(cr-0.35, cr+0.35)))
+				spread := cfg.crSpread
+				if spread == 0 {
+					spread = 0.35
+				}
+				cr = math.Max(0.05, math.Min(0.95, u(cr-spread, cr+spread)))
 				cw = u(0.01, 0.04)
-				out = u(out-0.004, out+0.004)
+				out = u(0.6*out, 1.4*out)
 			}
 			ratios := map[TokenType]float64{UncachedInput: 1 - cr - cw, CacheRead: cr, CacheWrite: cw, Output: out}
 			shares := map[string]float64{opus: 1 - pSonnet, sonnet: pSonnet}
@@ -176,6 +181,53 @@ func TestRecoversValueAndFactors(t *testing.T) {
 	if !ok || math.Abs(vOpus/300-1) > 0.03 || lo > 300/1.3 || hi < 300/1.3 {
 		t.Errorf("per-model values: opus %.2f, sonnet %.2f CI %.2f–%.2f", vOpus, vSonnet, lo, hi)
 	}
+}
+
+// claudeCfg is Claude-shaped: ~90 % cache reads, output ≈ 1 % of context
+// tokens at 5× input price, so output is 15–40 % of reference $ and that
+// share moves between cycles. True output factor 0.8.
+func claudeCfg() genCfg {
+	return genCfg{seed: 1, perCycle: 40, V: []float64{300, 300, 300},
+		model: map[string]float64{sonnet: 1.3}, typ: map[TokenType]float64{Output: 0.8},
+		cacheBase: []float64{0.85, 0.85, 0.85}, crSpread: 0.08,
+		outBase: []float64{0.008, 0.014, 0.027}, noise: 0.3}
+}
+
+func TestClaudeOutputFactorUnlocks(t *testing.T) {
+	cfg := claudeCfg()
+	segs, now := generate(cfg)
+	var all []*obs
+	for _, seg := range segs {
+		o, _, _ := prepare(seg, claudeParams.RefRate)
+		all = append(all, &o)
+	}
+	for _, key := range []string{"c0", "c1", "c2"} {
+		var usd, out, tok, outTok float64
+		for _, o := range all {
+			if o.seg.CycleKey != key {
+				continue
+			}
+			usd += o.usd
+			for _, tm := range o.terms {
+				if tm.typ == Output {
+					out += tm.usd
+					outTok += float64(tm.tokens)
+				} else {
+					tok += float64(tm.tokens)
+				}
+			}
+		}
+		t.Logf("cycle %s: output = %.2f%% of context tokens, %.1f%% of reference $", key, 100*outTok/tok, 100*out/usd)
+	}
+	fit := mustFit(t, segs, now)
+	checkFactors(t, fit, cfg)
+	f := fit.Factors["type:output"]
+	if f.Status != StatusIdentified || f.CILo > 0.8 || f.CIHi < 0.8 {
+		t.Errorf("output factor %s %.3f CI %.3f–%.3f, want identified covering 0.8", f.Status, f.Estimate, f.CILo, f.CIHi)
+	}
+	// Stage-2 scale intervals hold the factors fixed, so V error here is
+	// dominated by the output factor's own ±15 % × its 15–40 % $ share.
+	checkScales(t, fit, cfg.V, 0.06)
 }
 
 func TestConstantMixStaysPriorLocked(t *testing.T) {

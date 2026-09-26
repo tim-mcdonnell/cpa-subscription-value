@@ -8,24 +8,29 @@ import (
 // Unlock gates. A factor becomes a free parameter only when its $ share
 // varies within cycles (weighted SD) and the conditional Fisher information
 // of its log factor, given the cycle scale, clears the bar. Type factors also
-// need their token ratio to differ across cycles.
+// need their reference-$ share to differ across cycles.
+//
+// The cross-cycle gate is on $ share (Σ tok·refRate of the type / total),
+// not token ratio, so one threshold serves every type and provider: the
+// sensitivity of a prediction to g_t is exactly the type's $ share, whatever
+// its token count or price. (Claude output is ~1 % of context tokens but, at
+// 5× input price, 15–40 % of the $; a token-ratio gate never saw that.)
 const (
-	modelMinShareSD      = 0.05
-	modelMinFisher       = 10
-	cacheMinShareSD      = 0.08
-	outputMinShareSD     = 0.02
-	typeMinFisher        = 20
-	cacheMinCycleRange   = 0.10
-	outputMinCycleRange  = 0.02
-	ratioMinCycleSegs    = 5
-	ratioMinCycleContext = 1_000_000 // context tokens a cycle needs to enter the ratio-range gate
+	modelMinShareSD        = 0.05
+	modelMinFisher         = 10
+	cacheMinShareSD        = 0.08
+	outputMinShareSD       = 0.02
+	typeMinFisher          = 20
+	typeMinCycleShareRange = 0.05 // max−min of a type's $ share across cycles
+	shareMinCycleSegs      = 5
+	shareMinCycleUSD       = 5.0 // reference USD a cycle needs to enter the share-range gate
 )
 
 type diagnostic struct {
 	name                        string
 	unlocked                    bool
 	segments                    int
-	shareSD, fisher, ratioRange float64
+	shareSD, fisher, shareRange float64
 	cyclesCompared              int
 }
 
@@ -61,12 +66,12 @@ func assessIdentifiability(all []*obs, params ProviderParams, anchor string) []d
 		}
 		seen[typ] = true
 		d := assess(all, "type:"+string(typ), func(t *term) bool { return t.typ == typ })
-		minSD, minRange := cacheMinShareSD, cacheMinCycleRange
+		minSD := cacheMinShareSD
 		if typ == Output {
-			minSD, minRange = outputMinShareSD, outputMinCycleRange
+			minSD = outputMinShareSD
 		}
-		d.ratioRange, d.cyclesCompared = cycleRatioRange(all, typ)
-		d.unlocked = d.shareSD >= minSD && d.fisher >= typeMinFisher && d.ratioRange >= minRange
+		d.shareRange, d.cyclesCompared = cycleShareRange(all, typ)
+		d.unlocked = d.shareSD >= minSD && d.fisher >= typeMinFisher && d.shareRange >= typeMinCycleShareRange
 		out = append(out, d)
 	}
 	out = append(out, assess(all, "fast", func(t *term) bool { return t.fast }))
@@ -129,41 +134,42 @@ func assess(all []*obs, name string, match func(*term) bool) diagnostic {
 	return d
 }
 
-// cycleRatioRange is max−min over cycles of tokens(typ)/context tokens,
-// counting cycles with ≥ 5 segments and ≥ 1M context tokens; 0 when fewer
-// than two cycles qualify.
-func cycleRatioRange(all []*obs, typ TokenType) (float64, int) {
+// cycleShareRange is max−min over cycles of the type's share of reference $
+// (all factors 1), counting cycles with ≥ 5 segments and ≥ $5 reference USD;
+// 0 when fewer than two cycles qualify.
+func cycleShareRange(all []*obs, typ TokenType) (float64, int) {
 	type totals struct {
-		context, target int64
-		segments        int
+		usd, target float64
+		segments    int
 	}
 	byCycle := map[string]*totals{}
+	var keys []string
 	for _, o := range all {
 		row := byCycle[o.key]
 		if row == nil {
 			row = &totals{}
 			byCycle[o.key] = row
+			keys = append(keys, o.key)
 		}
 		row.segments++
+		row.usd += o.usd
 		for _, t := range o.terms {
-			if t.typ != Output {
-				row.context += t.tokens
-			}
 			if t.typ == typ {
-				row.target += t.tokens
+				row.target += t.usd
 			}
 		}
 	}
-	var ratios []float64
-	for _, row := range byCycle {
-		if row.segments < ratioMinCycleSegs || row.context < ratioMinCycleContext {
+	var shares []float64
+	for _, key := range keys {
+		row := byCycle[key]
+		if row.segments < shareMinCycleSegs || row.usd < shareMinCycleUSD {
 			continue
 		}
-		ratios = append(ratios, float64(row.target)/float64(row.context))
+		shares = append(shares, row.target/row.usd)
 	}
-	if len(ratios) < 2 {
-		return 0, len(ratios)
+	if len(shares) < 2 {
+		return 0, len(shares)
 	}
-	sort.Float64s(ratios)
-	return ratios[len(ratios)-1] - ratios[0], len(ratios)
+	sort.Float64s(shares)
+	return shares[len(shares)-1] - shares[0], len(shares)
 }

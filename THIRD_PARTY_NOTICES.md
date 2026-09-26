@@ -19,7 +19,7 @@ factor priors, per-cycle scales with a random walk (σ = 0.35) and a first-cycle
 prior SD of 2.5, the two-stage fit (shared factors with free scales, then scales
 with the random walk), Laplace intervals from the inverse Hessian, 21-day
 half-life decay times the boundary weight, the within-cycle share-SD,
-conditional-Fisher and cross-cycle ratio-range unlock gates, the online
+conditional-Fisher and cross-cycle range unlock gates, the online
 log-scale tracker, and the prequential per-lag backtest. What changed: every
 Codex-specific constant (the `gpt-5.6-sol` reference model, the credit price
 table and its fixed 2.5× fast multiplier, the hard-coded list of assessed
@@ -30,7 +30,12 @@ priors, with defaults per provider. Scales are expressed as fraction of the
 allowance per weighted API USD so that `exp(−s)` is the USD value of 100 % of a
 meter, and the "correlated" check that withholds `identified` looks only at
 factor–factor correlations (the per-cycle scale nuisance is already
-marginalized in each factor's interval). The interrupted-request coefficient,
+marginalized in each factor's interval). The cross-cycle gate for type factors
+is on each type's share of reference USD (range ≥ 0.05 across cycles with ≥ 5
+segments and ≥ $5 of reference USD) instead of the original token-ratio ranges
+(0.10 cache, 0.02 output): the $ share is what a type factor multiplies, so one
+threshold fits every type and provider, and Claude output (≈ 1 % of context
+tokens but 15–40 % of the $) can unlock. The interrupted-request coefficient,
 fixed model factors and the reference-mode (API vs credits) comparison scores
 were not ported.
 

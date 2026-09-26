@@ -176,6 +176,12 @@ Chart primitives: hand-written SVG helpers (line, bars, band, scatter) in one `<
 **Phase 5 — Polish**
 - Retention job, CSV export, `THIRD_PARTY_NOTICES.md`, release workflow (`<id>_<ver>_<goos>_<goarch>.zip` + `checksums.txt`, matching the store's expected asset names so it can be added to a custom `store-sources` registry later), README with the methodology and its limits (unrouted usage, feature-scoped meters, undisclosed internal weighting).
 
+## Follow-ups found during implementation
+
+- **Account relinking.** Since CPA v7.2.158 the next Claude login renames the auth file, and `AuthIndex` is a hash of the file path, so the account key changes while the subscription does not. Phase 5: when a new `auth_index` appears for the same provider with the same email (from `host.auth.list`) and the old one goes silent, record an alias so cycles and estimates continue as one series; expose it in `/accounts`.
+- **Backup discovery.** The homelab's `backup-verify` only inspects `*.db`; the store file is therefore `subscription-value.db`.
+- **Keeper config PUT.** From v7.3.7 a `PUT` to a store-installed plugin's config drops its `store:` block; `stacks/cpa-usage-keeper/README.md` in `homelab-compose` still documents `PUT` and should say `PATCH` (not this repo's change).
+
 ## Verification
 
 - **Unit/golden**: `go test ./...` — adapters (table tests against captured real `UsageRecord` JSON from Phase 1 for both providers, incl. the Claude `CachedTokens` quirk and failed attempts); meter/cycle assignment against scripted reset sequences (scheduled, early reset, regime revert); estimator against `internal/sim` corpora (assertions from §Estimator: V recovered within tolerance, lag identified, bypass flagged, CI coverage ≈ 95% over many seeds); weights recovery.

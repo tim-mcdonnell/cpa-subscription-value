@@ -138,7 +138,9 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 	return nil
 }
 
-func dbPath(dir string) string { return dir + "/subscription-value.sqlite" }
+// dbPath ends in .db so the homelab's backup-verify, which only looks for
+// *.db files, includes it.
+func dbPath(dir string) string { return dir + "/subscription-value.db" }
 
 func (a *App) startWriterLocked() {
 	if a.running {

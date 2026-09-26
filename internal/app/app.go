@@ -14,6 +14,7 @@ import (
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/api"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/config"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/engine"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/ingest"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/poll"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/pricing"
@@ -35,6 +36,7 @@ type App struct {
 	router    *api.Router
 	pricer    ingest.Pricer
 	catalog   *pricing.Catalog
+	engine    *engine.Engine
 	startedAt time.Time
 
 	// ingest is the hand-off between HandleUsage (must return fast) and the
@@ -154,6 +156,8 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 		a.startedAt = time.Now()
 	}
 	_ = st.SetSetting("plugin_started_at", a.startedAt)
+	a.engine = engine.New(st, a.catalog, a.log, engine.Options{Retention: time.Duration(cfg.RetentionDays) * 24 * time.Hour})
+	a.engine.RecordRestart(a.startedAt)
 	a.startWriterLocked()
 	a.startBackgroundLocked()
 	a.log("info", "plugin registered", map[string]any{"version": a.version, "schema": a.schema, "data_dir": cfg.DataDir})
@@ -200,6 +204,13 @@ func (a *App) startBackgroundLocked() {
 		go func() {
 			defer a.bgWG.Done()
 			p.Run(ctx)
+		}()
+	}
+	if eng := a.engine; eng != nil {
+		a.bgWG.Add(1)
+		go func() {
+			defer a.bgWG.Done()
+			eng.Run(ctx)
 		}()
 	}
 	if a.cfg.PriceSyncHours > 0 {
@@ -307,6 +318,12 @@ func (a *App) persist(st *store.Store, rec domain.UsageRecord) {
 	}
 	if inserted {
 		a.lastEventNS.Store(res.Event.ObservedAt.UnixNano())
+		if eng := a.engine; eng != nil {
+			eng.NoteEvent(res.Event.ObservedAt)
+			for _, r := range res.Readings {
+				eng.MarkDirty(acct.ID, r.MeterKey)
+			}
+		}
 		if a.cfg.LogLevel == "debug" {
 			a.log("debug", "event recorded", map[string]any{"provider": res.Provider, "model": res.Event.Model, "meters": len(res.Readings)})
 		}

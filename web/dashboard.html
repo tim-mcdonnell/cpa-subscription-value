@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subscription Value</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7; --card: #ffffff; --fg: #1b1f24; --muted: #6b7280; --line: #e2e5ea;
+  --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --soft: #eef2ff;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --card: #181b21; --fg: #e6e8eb; --muted: #98a2ad; --line: #2a2f38;
+    --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --soft: #1e2533;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --card: #181b21; --fg: #e6e8eb; --muted: #98a2ad; --line: #2a2f38;
+  --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --soft: #1e2533;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--font); }
+body { padding: 12px 16px 32px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 14px; margin: 20px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+h3 { font-size: 14px; margin: 0 0 6px; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+#status { color: var(--muted); font-size: 12px; }
+#status.err { color: var(--bad); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.card .v { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; word-break: break-all; }
+.card .s { color: var(--muted); font-size: 12px; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 8px; }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+td.mono { font-family: var(--mono); font-size: 12px; }
+tr:last-child td { border-bottom: 0; }
+.badge { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 18px; background: var(--soft); color: var(--accent); }
+.badge.claude { color: var(--warn); }
+.badge.codex { color: var(--ok); }
+.bad { color: var(--bad); }
+.muted { color: var(--muted); }
+.meters { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.meter { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.meter .row { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.meter .pct { font-size: 22px; font-variant-numeric: tabular-nums; }
+.meter svg { display: block; width: 100%; height: 44px; margin-top: 6px; }
+.meter .foot { color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+#keyForm { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#keyForm input { flex: 1 1 240px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+[hidden] { display: none !important; }
+.empty { color: var(--muted); padding: 8px 0; }
+@media (max-width: 480px) { body { padding: 8px 10px 24px; } .card .v { font-size: 17px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Subscription Value</h1>
+  <div id="status">loading…</div>
+</header>
+
+<section id="auth" class="panel" hidden>
+  <h3>Management key</h3>
+  <p class="muted" style="margin:0 0 8px">Not found in the Management Center session. Paste the CPA management key; it is kept in this tab's sessionStorage only.</p>
+  <form id="keyForm">
+    <input id="keyInput" type="password" autocomplete="off" placeholder="management key">
+    <button class="primary" type="submit">Connect</button>
+  </form>
+</section>
+
+<h2>Health</h2>
+<div id="health" class="cards"></div>
+
+<h2>Accounts</h2>
+<div class="panel scroll"><div id="accounts"></div></div>
+
+<h2>Latest meter readings</h2>
+<div id="meters"></div>
+
+<h2>Recent events</h2>
+<div class="panel scroll"><div id="events"></div></div>
+
+<script>
+'use strict';
+const PLUGIN_ID = 'cpa-subscription-value';
+const API = location.origin + '/v0/management/' + PLUGIN_ID;
+const SESSION_KEY = 'csv-management-key';
+const REFRESH_MS = 60000;
+const EVENT_LIMIT = 50;
+const READING_LIMIT = 200;
+
+(function applyTheme() {
+  const t = new URLSearchParams(location.search).get('theme');
+  if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+})();
+
+// ---- management key (mirrors CPAMC's secure-storage scheme) ----
+function decodeCPAMC(raw) {
+  const prefix = 'enc::v1::';
+  if (!raw.startsWith(prefix)) return raw;
+  const bytes = Uint8Array.from(atob(raw.slice(prefix.length)), c => c.charCodeAt(0));
+  const key = new TextEncoder().encode('cli-proxy-api-webui::secure-storage|' + location.host + '|' + navigator.userAgent);
+  const out = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) out[i] = bytes[i] ^ key[i % key.length];
+  return new TextDecoder().decode(out);
+}
+function parseStored(raw) {
+  if (!raw) return null;
+  try { return JSON.parse(decodeCPAMC(raw)); } catch (_) { return null; }
+}
+function readCPAMCKey() {
+  try {
+    const persisted = parseStored(localStorage.getItem('cli-proxy-auth'));
+    const auth = (persisted && persisted.state) || persisted;
+    if (auth && auth.managementKey && auth.rememberPassword !== false) {
+      if (auth.apiBase && new URL(auth.apiBase, location.origin).origin !== location.origin) return '';
+      return String(auth.managementKey).trim();
+    }
+    const legacy = parseStored(localStorage.getItem('managementKey'));
+    return typeof legacy === 'string' ? legacy.trim() : '';
+  } catch (_) { return ''; }
+}
+function readKey() {
+  const k = readCPAMCKey();
+  if (k) return k;
+  try { return sessionStorage.getItem(SESSION_KEY) || ''; } catch (_) { return ''; }
+}
+function saveKey(k) { try { sessionStorage.setItem(SESSION_KEY, k); } catch (_) {} }
+function dropKey() { try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {} }
+
+// ---- api ----
+class AuthError extends Error {}
+async function api(path, key) {
+  const res = await fetch(API + path, { headers: { Authorization: 'Bearer ' + key }, cache: 'no-store' });
+  if (res.status === 401 || res.status === 403) throw new AuthError('management key rejected (' + res.status + ')');
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || (path + ' returned ' + res.status));
+  return body;
+}
+
+// ---- formatting ----
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nf = new Intl.NumberFormat();
+const fmtInt = n => nf.format(Math.round(n || 0));
+const fmtUSD = n => '$' + (n || 0).toFixed(n >= 100 ? 2 : 4);
+const fmtPct = f => (f * 100).toFixed(1) + '%';
+const fmtBytes = b => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MiB' : b >= 1024 ? (b / 1024).toFixed(0) + ' KiB' : (b || 0) + ' B';
+function fmtTime(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  return isNaN(d) ? '—' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function fmtAgo(s) {
+  if (!s) return 'never';
+  const sec = Math.max(0, (Date.now() - new Date(s).getTime()) / 1000);
+  return fmtDur(sec) + ' ago';
+}
+function fmtDur(sec) {
+  if (sec < 90) return Math.round(sec) + 's';
+  if (sec < 5400) return Math.round(sec / 60) + 'm';
+  if (sec < 172800) return (sec / 3600).toFixed(1) + 'h';
+  return (sec / 86400).toFixed(1) + 'd';
+}
+
+// ---- SVG helpers (extend here in Phase 2) ----
+const SVG = {
+  ns: 'http://www.w3.org/2000/svg',
+  scale(values, lo, hi, outLo, outHi) {
+    if (hi === lo) return () => (outLo + outHi) / 2;
+    return v => outLo + (v - lo) / (hi - lo) * (outHi - outLo);
+  },
+  // points: [{x, y}] in data units; returns an <svg> string.
+  line(points, opts = {}) {
+    const w = opts.width || 240, h = opts.height || 44, pad = opts.pad ?? 2;
+    if (!points.length) return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"></svg>`;
+    const xs = points.map(p => p.x), ys = points.map(p => p.y);
+    const xMin = opts.xMin ?? Math.min(...xs), xMax = opts.xMax ?? Math.max(...xs);
+    const yMin = opts.yMin ?? Math.min(...ys), yMax = opts.yMax ?? Math.max(...ys);
+    const sx = SVG.scale(xs, xMin, xMax, pad, w - pad), sy = SVG.scale(ys, yMin, yMax, h - pad, pad);
+    const d = points.map((p, i) => (i ? 'L' : 'M') + sx(p.x).toFixed(1) + ' ' + sy(p.y).toFixed(1)).join(' ');
+    const area = opts.fill ? `<path d="${d} L${sx(xMax).toFixed(1)} ${h - pad} L${sx(xMin).toFixed(1)} ${h - pad} Z" fill="${opts.fill}" opacity=".15"/>` : '';
+    const last = points[points.length - 1];
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(opts.label || '')}">
+      ${opts.guides ? opts.guides.map(g => `<line x1="${pad}" x2="${w - pad}" y1="${sy(g).toFixed(1)}" y2="${sy(g).toFixed(1)}" stroke="currentColor" opacity=".15" stroke-dasharray="3 3"/>`).join('') : ''}
+      ${area}<path d="${d}" fill="none" stroke="${opts.stroke || 'var(--accent)'}" stroke-width="${opts.strokeWidth || 1.5}" vector-effect="non-scaling-stroke"/>
+      <circle cx="${sx(last.x).toFixed(1)}" cy="${sy(last.y).toFixed(1)}" r="2" fill="${opts.stroke || 'var(--accent)'}"/>
+    </svg>`;
+  },
+  // values: [number]; equal-width bars from a zero baseline.
+  bars(values, opts = {}) {
+    const w = opts.width || 240, h = opts.height || 44, pad = opts.pad ?? 2, gap = opts.gap ?? 1;
+    if (!values.length) return `<svg viewBox="0 0 ${w} ${h}"></svg>`;
+    const yMax = opts.yMax ?? Math.max(0, ...values), yMin = Math.min(0, ...values);
+    const sy = SVG.scale(values, yMin, yMax, h - pad, pad), bw = (w - 2 * pad) / values.length;
+    const rects = values.map((v, i) => {
+      const y0 = sy(0), y1 = sy(v);
+      return `<rect x="${(pad + i * bw).toFixed(1)}" y="${Math.min(y0, y1).toFixed(1)}" width="${Math.max(0.5, bw - gap).toFixed(1)}" height="${Math.abs(y0 - y1).toFixed(1)}" fill="${opts.fill || 'var(--accent)'}"/>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${rects}</svg>`;
+  }
+};
+
+// ---- rendering ----
+function card(k, v, s) { return `<div class="card"><div class="k">${esc(k)}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`; }
+function renderHealth(h) {
+  const st = h.store || {};
+  $('#health').innerHTML = [
+    card('Plugin', esc(h.plugin_version || '?'), 'schema v' + esc(h.schema_version ?? '?')),
+    card('Uptime', esc(fmtDur(h.uptime_s || 0)), 'since ' + esc(fmtTime(h.started_at))),
+    card('Events', fmtInt(st.events), st.oldest_event ? esc(fmtTime(st.oldest_event)) + ' → ' + esc(fmtTime(st.newest_event)) : 'none yet'),
+    card('Readings', fmtInt(st.readings), fmtInt(st.accounts) + ' account' + (st.accounts === 1 ? '' : 's')),
+    card('Ingest', `<span class="${h.ingest && h.ingest.dropped ? 'bad' : ''}">${fmtInt(h.ingest && h.ingest.dropped)}</span> dropped`, 'queued ' + fmtInt(h.ingest && h.ingest.queued)),
+    card('Last event', esc(fmtAgo(h.ingest && h.ingest.last_event_at)), esc(fmtTime(h.ingest && h.ingest.last_event_at))),
+    card('Database', esc(fmtBytes(st.db_bytes)), h.error ? `<span class="bad">${esc(h.error)}</span>` : 'ok'),
+  ].join('');
+}
+function providerBadge(p) { return `<span class="badge ${esc(p)}">${esc(p)}</span>`; }
+function renderAccounts(accounts) {
+  if (!accounts.length) { $('#accounts').innerHTML = '<div class="empty">No accounts yet. They appear after the first request flows through CPA.</div>'; return; }
+  $('#accounts').innerHTML = `<table><thead><tr><th>Provider</th><th>Auth index</th><th>Auth file</th><th>Email</th><th>Plan</th><th>First seen</th><th>Last seen</th></tr></thead><tbody>` +
+    accounts.map(a => `<tr>
+      <td>${providerBadge(a.provider)}</td><td class="mono">${esc(a.auth_index)}</td><td class="mono">${esc(a.auth_id)}</td>
+      <td>${esc(a.email || '—')}</td><td>${esc(a.plan_type || '—')}</td><td>${esc(fmtTime(a.first_seen))}</td><td>${esc(fmtTime(a.last_seen))}</td></tr>`).join('') +
+    '</tbody></table>';
+}
+// readings arrive newest-first; group by meter+source, keep the latest and a sparkline series.
+function groupReadings(readings) {
+  const groups = new Map();
+  for (const r of readings) {
+    const k = r.meter_key + '|' + r.source;
+    let g = groups.get(k);
+    if (!g) { g = { meter: r.meter_key, source: r.source, latest: r, series: [] }; groups.set(k, g); }
+    g.series.push({ x: new Date(r.observed_at).getTime(), y: r.used_fraction });
+  }
+  for (const g of groups.values()) g.series.reverse();
+  return [...groups.values()].sort((a, b) => a.meter.localeCompare(b.meter) || a.source.localeCompare(b.source));
+}
+function renderMeters(perAccount) {
+  const html = perAccount.map(({ account, readings }) => {
+    const groups = groupReadings(readings);
+    const body = groups.length ? `<div class="meters">${groups.map(g => {
+      const r = g.latest, over = r.used_fraction >= 1;
+      return `<div class="meter">
+        <div class="row"><strong>${esc(g.meter)}</strong><span class="badge">${esc(g.source)}</span></div>
+        <div class="row"><span class="pct ${over ? 'bad' : ''}">${esc(fmtPct(r.used_fraction))}</span><span class="muted">raw ${esc(r.raw)} · ${g.series.length} pts</span></div>
+        ${SVG.line(g.series, { yMin: 0, yMax: Math.max(1, ...g.series.map(p => p.y)), guides: [0.5, 1], fill: 'var(--accent)', label: g.meter + ' used fraction' })}
+        <div class="foot"><span>${esc(fmtAgo(r.observed_at))}</span><span>resets ${esc(fmtTime(r.reset_at))}${r.status ? ' · ' + esc(r.status) : ''}</span></div>
+      </div>`;
+    }).join('')}</div>` : '<div class="empty">No readings yet.</div>';
+    return `<div class="panel"><h3>${providerBadge(account.provider)} <span class="mono">${esc(account.auth_index)}</span> <span class="muted">${esc(account.email || account.auth_id)}</span></h3>${body}</div>`;
+  }).join('');
+  $('#meters').innerHTML = html || '<div class="panel empty">No accounts yet.</div>';
+}
+function renderEvents(events, accountsById) {
+  if (!events.length) { $('#events').innerHTML = '<div class="empty">No events yet.</div>'; return; }
+  $('#events').innerHTML = `<table><thead><tr><th>Observed</th><th>Account</th><th>Model</th><th>Tier</th><th class="n">Input</th><th class="n">Cache rd</th><th class="n">Cache wr</th><th class="n">Output</th><th class="n">API $</th><th>Status</th></tr></thead><tbody>` +
+    events.map(e => {
+      const a = accountsById.get(e.account_id);
+      return `<tr>
+        <td>${esc(fmtTime(e.observed_at))}</td>
+        <td>${a ? providerBadge(a.provider) : ''} <span class="mono">${esc(e.auth_index)}</span></td>
+        <td class="mono">${esc(e.model)}${e.alias && e.alias !== e.model ? ` <span class="muted">(${esc(e.alias)})</span>` : ''}</td>
+        <td>${esc(e.service_tier || '')}${e.is_fast ? ' fast' : ''}${e.is_long ? ' long' : ''}</td>
+        <td class="n">${fmtInt(e.uncached_input)}</td><td class="n">${fmtInt(e.cache_read)}</td><td class="n">${fmtInt(e.cache_write)}</td><td class="n">${fmtInt(e.output)}</td>
+        <td class="n">${esc(fmtUSD(e.api_usd))}</td>
+        <td class="${e.failed ? 'bad' : ''}">${e.failed ? 'failed ' + esc(e.status_code || '') : 'ok'}${e.flags ? ` <span class="muted">flags ${e.flags}</span>` : ''}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// ---- refresh loop ----
+let key = readKey();
+let inflight = false;
+function setStatus(msg, err) { const el = $('#status'); el.textContent = msg; el.classList.toggle('err', !!err); }
+async function refresh() {
+  if (inflight) return;
+  if (!key) { $('#auth').hidden = false; setStatus('management key required', true); return; }
+  inflight = true;
+  try {
+    const [health, acc] = await Promise.all([api('/health', key), api('/accounts', key)]);
+    $('#auth').hidden = true;
+    renderHealth(health);
+    const accounts = acc.accounts || [];
+    renderAccounts(accounts);
+    const accountsById = new Map(accounts.map(a => [a.id, a]));
+    const [events, ...readings] = await Promise.all([
+      api('/events?limit=' + EVENT_LIMIT + '&order=desc', key),
+      ...accounts.map(a => api('/readings?auth_index=' + encodeURIComponent(a.auth_index) + '&limit=' + READING_LIMIT + '&order=desc', key)),
+    ]);
+    renderMeters(accounts.map((account, i) => ({ account, readings: readings[i].readings || [] })));
+    renderEvents(events.events || [], accountsById);
+    setStatus('updated ' + new Date().toLocaleTimeString() + (health.ok ? '' : ' · store unavailable'), !health.ok);
+  } catch (e) {
+    if (e instanceof AuthError) { dropKey(); key = ''; $('#auth').hidden = false; }
+    setStatus(e.message || String(e), true);
+  } finally {
+    inflight = false;
+  }
+}
+$('#keyForm').addEventListener('submit', ev => {
+  ev.preventDefault();
+  const k = $('#keyInput').value.trim();
+  if (!k) return;
+  key = k; saveKey(k); $('#keyInput').value = '';
+  refresh();
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
+setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, REFRESH_MS);
+refresh();
+</script>
+</body>
+</html>

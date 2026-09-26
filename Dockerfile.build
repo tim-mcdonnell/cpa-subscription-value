@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+# Builds the plugin shared library against debian bookworm's glibc, which is
+# what the eceasy/cli-proxy-api image runs. Usage:
+#   docker build -f Dockerfile.build --platform linux/amd64 --build-arg VERSION=0.1.0 --output dist/linux/amd64 .
+# The final stage is `scratch` holding only the .so, so --output extracts it.
+
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS builder
+ARG VERSION=0.1.0
+ARG TARGETARCH
+ARG BUILDARCH
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Native toolchain, plus a cross toolchain when TARGETARCH differs from the
+# build host (e.g. building linux/amd64 on an Apple Silicon Docker VM). The
+# cross libc packages track bookworm's glibc 2.36, the same as the CPA image.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gcc libc6-dev; \
+    if [ "$TARGETARCH" = "arm64" ] && [ "$BUILDARCH" != "arm64" ]; then \
+        apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross; \
+    fi; \
+    if [ "$TARGETARCH" = "amd64" ] && [ "$BUILDARCH" != "amd64" ]; then \
+        apt-get install -y --no-install-recommends gcc-x86-64-linux-gnu libc6-dev-amd64-cross; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        arm64) [ "$BUILDARCH" = "arm64" ] || export CC=aarch64-linux-gnu-gcc ;; \
+        amd64) [ "$BUILDARCH" = "amd64" ] || export CC=x86_64-linux-gnu-gcc ;; \
+    esac; \
+    mkdir -p /out; \
+    CGO_ENABLED=1 GOOS=linux GOARCH="$TARGETARCH" go build -trimpath -buildvcs=false -buildmode=c-shared \
+        -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
+        -o /out/cpa-subscription-value.so ./cmd/plugin; \
+    rm -f /out/*.h
+
+FROM scratch
+COPY --from=builder /out/cpa-subscription-value.so /cpa-subscription-value.so

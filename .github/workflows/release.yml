@@ -1,0 +1,110 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+# Default to read-only; only the job that publishes the release gets write.
+permissions:
+  contents: read
+env:
+  GO_VERSION: "1.27.x"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  # Linux builds go through Dockerfile.build so the .so links against debian
+  # bookworm's glibc, matching the CPA image; arm64 uses buildx + qemu.
+  build-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.goarch != 'amd64'
+      - uses: docker/setup-buildx-action@v3
+      - name: Build shared library
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          docker buildx build -f Dockerfile.build \
+            --platform "linux/${GOARCH}" \
+            --build-arg "VERSION=${VERSION}" \
+            --output "type=local,dest=dist/linux/${GOARCH}" .
+          test -f "dist/linux/${GOARCH}/cpa-subscription-value.so"
+      - name: Package
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          make zip VERSION="${VERSION}" GOOS=linux GOARCH="${GOARCH}" \
+            ARTIFACT="dist/linux/${GOARCH}/cpa-subscription-value.so"
+      - name: Upload zip
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zip-linux-${{ matrix.goarch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-darwin:
+    needs: test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build and package
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          make package VERSION="${VERSION}" GOOS=darwin GOARCH=arm64
+      - name: Upload zip
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zip-darwin-arm64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: [build-linux, build-darwin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download zips
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: zip-*
+          merge-multiple: true
+          path: dist
+      - name: Combined checksums
+        run: |
+          cd dist
+          sha256sum *.zip | tee checksums.txt
+      - name: Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true

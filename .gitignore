@@ -1,0 +1,10 @@
+# build outputs
+/dist/
+*.so
+*.dylib
+*.dll
+# cgo c-shared header emitted beside the library
+cpa-subscription-value.h
+
+# os
+.DS_Store

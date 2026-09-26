@@ -1,0 +1,11 @@
+{
+  "id": "cpa-subscription-value",
+  "name": "Subscription Value",
+  "description": "Estimates the API-equivalent dollar value of Claude Max and ChatGPT/Codex subscriptions from per-request tokens and quota headers: $ per 100% of the weekly allowance with confidence intervals, per-model weights, burn rate and forecast, in one dashboard for both providers.",
+  "author": "tim-mcdonnell",
+  "repository": "https://github.com/tim-mcdonnell/cpa-subscription-value",
+  "logo": "https://raw.githubusercontent.com/tim-mcdonnell/cpa-subscription-value/main/logo.svg",
+  "homepage": "https://github.com/tim-mcdonnell/cpa-subscription-value",
+  "license": "MIT",
+  "tags": ["Management", "Usage", "Quota", "Claude", "Codex", "Dashboard"]
+}

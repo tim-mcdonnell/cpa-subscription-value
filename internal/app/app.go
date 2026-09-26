@@ -37,6 +37,7 @@ type App struct {
 	pricer    ingest.Pricer
 	catalog   *pricing.Catalog
 	engine    *engine.Engine
+	poller    *poll.Poller
 	startedAt time.Time
 
 	// ingest is the hand-off between HandleUsage (must return fast) and the
@@ -198,8 +199,10 @@ func (a *App) startBackgroundLocked() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.background = cancel
+	a.poller = nil
 	if a.host != nil && a.cfg.PollInterval() > 0 {
 		p := poll.New(a.store, a.host, a.log, a.cfg.PollInterval())
+		a.poller = p
 		a.bgWG.Add(1)
 		go func() {
 			defer a.bgWG.Done()
@@ -371,6 +374,63 @@ func (a *App) health() api.Health {
 		LastEventAt:   last,
 		Config:        cfg,
 	}
+}
+
+// Actions exposed to the management API. Each one is synchronous.
+
+// Recompute runs the estimator for one meter now.
+func (a *App) Recompute(accountID int64, meterKey string) error {
+	a.mu.Lock()
+	eng := a.engine
+	a.mu.Unlock()
+	if eng == nil {
+		return fmt.Errorf("plugin not registered")
+	}
+	return eng.Recompute(accountID, meterKey)
+}
+
+// PollNow runs one poll round and returns its summary.
+func (a *App) PollNow(ctx context.Context) (any, error) {
+	a.mu.Lock()
+	p := a.poller
+	a.mu.Unlock()
+	if p == nil {
+		return nil, fmt.Errorf("polling is disabled or no host is attached")
+	}
+	return p.PollOnce(ctx), nil
+}
+
+// SyncPrices fetches models.dev now.
+func (a *App) SyncPrices(ctx context.Context) (bool, error) {
+	a.mu.Lock()
+	c := a.catalog
+	a.mu.Unlock()
+	if c == nil {
+		return false, fmt.Errorf("plugin not registered")
+	}
+	return c.SyncNow(ctx)
+}
+
+// Reprice recomputes stored costs under the active price table.
+func (a *App) Reprice(ctx context.Context) (int64, error) {
+	a.mu.Lock()
+	c, st := a.catalog, a.store
+	a.mu.Unlock()
+	if c == nil || st == nil {
+		return 0, fmt.Errorf("plugin not registered")
+	}
+	return c.Reprice(ctx, st, 500)
+}
+
+// Reconfigured restarts the background schedulers after a settings change.
+func (a *App) Reconfigured() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.store == nil {
+		return
+	}
+	a.stopBackgroundLocked()
+	a.startBackgroundLocked()
 }
 
 func (a *App) log(level, msg string, fields map[string]any) {

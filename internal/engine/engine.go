@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/api"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/estimate"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/meter"
@@ -57,10 +58,9 @@ func (o Options) withDefaults() Options {
 
 // Settings keys.
 const (
-	settingRestartGaps   = "restart_gaps"
-	settingLastEventAt   = "last_event_at"
-	settingLastRecompute = "last_recompute_" // + "<account>_<meter>"
-	settingLastWeights   = "last_weights_"   // + "<account>_<meter>"
+	settingRestartGaps = "restart_gaps"
+	settingLastEventAt = "last_event_at"
+	settingLastWeights = "last_weights_" // + "<account>_<meter>"
 )
 
 type dirtyKey struct {
@@ -205,13 +205,15 @@ func (e *Engine) flush(ctx context.Context, force bool) {
 func (e *Engine) Recompute(accountID int64, meterKey string) error {
 	o := estimate.DefaultAnalyzeOptions()
 	o.RestartGaps = e.gaps
-	if acct, ok, _ := e.st.GetAccount(accountID); ok {
+	key := fmt.Sprint(accountID)
+	if acct, ok, _ := e.st.GetAccount(accountID); ok && acct.AuthIndex != "" {
 		o.Series = acct.AuthIndex
+		key = acct.AuthIndex
 	}
 	if err := estimate.RecomputeWith(e.st, accountID, meterKey, time.Now(), o); err != nil {
 		return err
 	}
-	return e.st.SetSetting(fmt.Sprintf("%s%d_%s", settingLastRecompute, accountID, meterKey), time.Now())
+	return e.st.SetSetting(api.RecomputeSettingKey(key, meterKey), time.Now())
 }
 
 func (e *Engine) fitAll(ctx context.Context) {

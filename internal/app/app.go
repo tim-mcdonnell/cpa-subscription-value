@@ -132,6 +132,7 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 			a.log("warn", "load price snapshot failed; using built-in table", map[string]any{"error": err.Error()})
 		}
 		a.pricer = a.catalog
+		a.router = api.New(PluginID, api.Deps{Store: a.store, Health: a.health, Catalog: a.catalog, Actions: a})
 		a.startBackgroundLocked()
 		return nil
 	}
@@ -152,7 +153,7 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 		a.log("warn", "load price snapshot failed; using built-in table", map[string]any{"error": err.Error()})
 	}
 	a.pricer = a.catalog
-	a.router = api.New(PluginID, storeShim{st}, a.health)
+	a.router = api.New(PluginID, api.Deps{Store: st, Health: a.health, Catalog: a.catalog, Actions: a})
 	if a.startedAt.IsZero() {
 		a.startedAt = time.Now()
 	}
@@ -442,23 +443,4 @@ func (a *App) log(level, msg string, fields map[string]any) {
 	}
 	fields["plugin"] = PluginID
 	a.host.Log(level, msg, fields)
-}
-
-// storeShim adapts store.Store to api.Store; the query structs are
-// field-compatible by construction.
-type storeShim struct{ s *store.Store }
-
-func (s storeShim) ListAccounts() ([]domain.Account, error) { return s.s.ListAccounts() }
-func (s storeShim) GetAccountByAuthIndex(idx string) (domain.Account, bool, error) {
-	return s.s.GetAccountByAuthIndex(idx)
-}
-func (s storeShim) ListEvents(q api.EventQuery) ([]domain.UsageEvent, error) {
-	return s.s.ListEvents(store.EventQuery(q))
-}
-func (s storeShim) ListReadings(q api.ReadingQuery) ([]domain.MeterReading, error) {
-	return s.s.ListReadings(store.ReadingQuery(q))
-}
-func (s storeShim) Stats() (api.Stats, error) {
-	st, err := s.s.Stats()
-	return api.Stats(st), err
 }

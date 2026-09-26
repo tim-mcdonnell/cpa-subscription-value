@@ -1,9 +1,12 @@
 // Package api serves the management routes (JSON, management-key protected by
-// the host) and the unauthenticated dashboard resource. It speaks only to the
-// Store interface below so it can be tested without SQLite.
+// the host) and the unauthenticated dashboard resource. Reads go straight to
+// the store; anything that mutates state or runs a job goes through Actions,
+// which the app implements.
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,42 +16,11 @@ import (
 
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/abi"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/poll"
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/pricing"
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/store"
 	"github.com/tim-mcdonnell/cpa-subscription-value/web"
 )
-
-// Stats is the store's row counts and size, surfaced by /health.
-type Stats struct {
-	Accounts, Events, Readings int64
-	OldestEvent, NewestEvent   time.Time
-	DBBytes                    int64
-}
-
-// EventQuery selects usage events. AccountID 0 means all accounts; zero From/To
-// mean unbounded; Limit <= 0 means the store's default.
-type EventQuery struct {
-	AccountID int64
-	From, To  time.Time
-	Limit     int
-	Desc      bool
-}
-
-// ReadingQuery selects meter readings. Empty MeterKey/Source mean any.
-type ReadingQuery struct {
-	AccountID        int64
-	MeterKey, Source string
-	From, To         time.Time
-	Limit            int
-	Desc             bool
-}
-
-// Store is the read side of internal/store that the API needs.
-type Store interface {
-	ListAccounts() ([]domain.Account, error)
-	GetAccountByAuthIndex(string) (domain.Account, bool, error)
-	ListEvents(EventQuery) ([]domain.UsageEvent, error)
-	ListReadings(ReadingQuery) ([]domain.MeterReading, error)
-	Stats() (Stats, error)
-}
 
 // Health is the process-level state the app reports; the store adds its own.
 type Health struct {
@@ -64,33 +36,88 @@ type Health struct {
 // HealthFunc snapshots Health at request time.
 type HealthFunc func() Health
 
+// Actions are the jobs the POST routes trigger. The app owns scheduling and
+// locking; every method may block for the length of the job.
+type Actions interface {
+	// Recompute re-derives one meter of one account synchronously.
+	Recompute(accountID int64, meterKey string) error
+	// PollNow runs one poll round and returns its summary (JSON-encodable).
+	PollNow(ctx context.Context) (any, error)
+	// SyncPrices fetches models.dev and activates the table.
+	SyncPrices(ctx context.Context) (changed bool, err error)
+	// Reprice rewrites frozen $ of events not under the active hash.
+	Reprice(ctx context.Context) (updated int64, err error)
+	// Reconfigured tells the app that /settings changed.
+	Reconfigured()
+}
+
+// Deps is everything the router reads from or delegates to.
+type Deps struct {
+	Store   *store.Store     // required
+	Health  HealthFunc       // may be nil
+	Catalog *pricing.Catalog // may be nil → price routes 503
+	Actions Actions          // may be nil → POST routes 503 (settings still save)
+}
+
 // Router dispatches management and resource requests.
 type Router struct {
 	pluginID string
-	store    Store
-	health   HealthFunc
+	d        Deps
+	now      func() time.Time
 }
 
-// New builds a Router. health may be nil.
-func New(pluginID string, store Store, health HealthFunc) *Router {
-	return &Router{pluginID: pluginID, store: store, health: health}
+// New builds a Router.
+func New(pluginID string, d Deps) *Router {
+	return &Router{pluginID: pluginID, d: d, now: time.Now}
+}
+
+// RecomputeSettingKey is where the app records when it last recomputed a
+// meter (value: a JSON time). /health reports it.
+func RecomputeSettingKey(authIndex, meterKey string) string {
+	return "last_recompute_" + authIndex + "_" + meterKey
 }
 
 const (
 	defaultLimit = 100
 	maxLimit     = 5000
+	jobTimeout   = 5 * time.Minute
 )
 
-var managementPaths = []string{"/health", "/accounts", "/events", "/readings"}
+type handlerFunc func(r *Router, q url.Values, body []byte) abi.ManagementResponse
+
+type route struct {
+	method, path string
+	h            handlerFunc
+}
+
+// routes is the management surface, in registration order.
+var routes = []route{
+	{http.MethodGet, "/health", (*Router).handleHealth},
+	{http.MethodGet, "/accounts", (*Router).handleAccounts},
+	{http.MethodGet, "/events", (*Router).handleEvents},
+	{http.MethodGet, "/readings", (*Router).handleReadings},
+	{http.MethodGet, "/summary", (*Router).handleSummary},
+	{http.MethodGet, "/cycles", (*Router).handleCycles},
+	{http.MethodGet, "/series", (*Router).handleSeries},
+	{http.MethodGet, "/weights", (*Router).handleWeights},
+	{http.MethodGet, "/prices", (*Router).handlePrices},
+	{http.MethodPost, "/prices/sync", (*Router).handlePriceSync},
+	{http.MethodPost, "/prices/reprice", (*Router).handleReprice},
+	{http.MethodGet, "/settings", (*Router).handleSettings},
+	{http.MethodPost, "/settings", (*Router).handleSettingsPost},
+	{http.MethodPost, "/recompute", (*Router).handleRecompute},
+	{http.MethodPost, "/poll", (*Router).handlePoll},
+	{http.MethodGet, "/export", (*Router).handleExport},
+}
 
 // Registration answers management.register.
 func (r *Router) Registration() abi.ManagementRegistration {
-	routes := make([]abi.ManagementRoute, 0, len(managementPaths))
-	for _, p := range managementPaths {
-		routes = append(routes, abi.ManagementRoute{Method: http.MethodGet, Path: "/" + r.pluginID + p})
+	out := make([]abi.ManagementRoute, 0, len(routes))
+	for _, rt := range routes {
+		out = append(out, abi.ManagementRoute{Method: rt.method, Path: "/" + r.pluginID + rt.path})
 	}
 	return abi.ManagementRegistration{
-		Routes: routes,
+		Routes: out,
 		Resources: []abi.ResourceRoute{{
 			Path:        "/dashboard",
 			Menu:        "Subscription Value",
@@ -110,22 +137,25 @@ func (r *Router) Handle(req abi.ManagementRequest) abi.ManagementResponse {
 		}
 	}
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
-	if method != "" && method != http.MethodGet && method != http.MethodHead {
-		for _, p := range managementPaths {
-			if p == path {
-				return abi.ErrorResponse(http.StatusMethodNotAllowed, "method not allowed")
-			}
-		}
+	if method == "" || method == http.MethodHead {
+		method = http.MethodGet
 	}
-	switch path {
-	case "/health":
-		return r.handleHealth()
-	case "/accounts":
-		return r.handleAccounts()
-	case "/events":
-		return r.handleEvents(query)
-	case "/readings":
-		return r.handleReadings(query)
+	known := false
+	for _, rt := range routes {
+		if rt.path != path {
+			continue
+		}
+		known = true
+		if rt.method != method {
+			continue
+		}
+		if r.d.Store == nil && path != "/health" {
+			return abi.ErrorResponse(http.StatusServiceUnavailable, "store not ready")
+		}
+		return rt.h(r, query, req.Body)
+	}
+	if known {
+		return abi.ErrorResponse(http.StatusMethodNotAllowed, "method not allowed")
 	}
 	return abi.ErrorResponse(http.StatusNotFound, "not found")
 }
@@ -165,11 +195,11 @@ func (r *Router) normalize(req abi.ManagementRequest) (string, url.Values) {
 	return p, q
 }
 
-func (r *Router) handleHealth() abi.ManagementResponse {
-	now := time.Now()
+func (r *Router) handleHealth(url.Values, []byte) abi.ManagementResponse {
+	now := r.now()
 	var h Health
-	if r.health != nil {
-		h = r.health()
+	if r.d.Health != nil {
+		h = r.d.Health()
 	}
 	body := map[string]any{
 		"ok":             true,
@@ -186,120 +216,175 @@ func (r *Router) handleHealth() abi.ManagementResponse {
 		},
 		"config": h.Config,
 	}
-	status := http.StatusOK
-	if r.store == nil {
+	st := r.d.Store
+	if st == nil {
 		body["ok"] = false
 		body["error"] = "store not ready"
-		status = http.StatusServiceUnavailable
-	} else if st, err := r.store.Stats(); err != nil {
+		return abi.JSONResponse(http.StatusServiceUnavailable, body)
+	}
+	stats, err := st.Stats()
+	if err != nil {
 		body["ok"] = false
 		body["error"] = "store stats: " + err.Error()
-		status = http.StatusServiceUnavailable
-	} else {
-		body["store"] = map[string]any{
-			"accounts":     st.Accounts,
-			"events":       st.Events,
-			"readings":     st.Readings,
-			"oldest_event": tsPtr(st.OldestEvent),
-			"newest_event": tsPtr(st.NewestEvent),
-			"db_bytes":     st.DBBytes,
+		return abi.JSONResponse(http.StatusServiceUnavailable, body)
+	}
+	body["store"] = map[string]any{
+		"accounts":     stats.Accounts,
+		"events":       stats.Events,
+		"readings":     stats.Readings,
+		"oldest_event": tsPtr(stats.OldestEvent),
+		"newest_event": tsPtr(stats.NewestEvent),
+		"db_bytes":     stats.DBBytes,
+	}
+	accounts, err := st.ListAccounts()
+	if err != nil {
+		body["ok"] = false
+		body["error"] = "list accounts: " + err.Error()
+		return abi.JSONResponse(http.StatusServiceUnavailable, body)
+	}
+	polls := []map[string]any{}
+	var recomputes []map[string]any
+	for _, a := range accounts {
+		var ps poll.Status
+		row := map[string]any{"auth_index": a.AuthIndex, "provider": a.Provider, "status": nil}
+		if ok, err := st.GetSetting(poll.SettingKey(a.AuthIndex), &ps); err == nil && ok {
+			row["status"] = ps
+		}
+		polls = append(polls, row)
+		meters, _ := st.MeterKeys(a.ID)
+		for _, m := range meters {
+			if at, ok := r.lastRecompute(a, m); ok {
+				recomputes = append(recomputes, map[string]any{"auth_index": a.AuthIndex, "meter": m, "last_recompute_at": at})
+			}
 		}
 	}
-	return abi.JSONResponse(status, body)
+	body["polls"] = polls
+	if recomputes != nil {
+		body["estimator"] = map[string]any{"recomputes": recomputes}
+	}
+	if p, ok := r.priceInfo(); ok {
+		body["prices"] = p
+	}
+	return abi.JSONResponse(http.StatusOK, body)
 }
 
-func (r *Router) handleAccounts() abi.ManagementResponse {
-	if r.store == nil {
-		return abi.ErrorResponse(http.StatusServiceUnavailable, "store not ready")
+// lastRecompute reads RecomputeSettingKey, also accepting the account id in
+// place of the auth index.
+func (r *Router) lastRecompute(a domain.Account, meterKey string) (time.Time, bool) {
+	for _, k := range []string{RecomputeSettingKey(a.AuthIndex, meterKey), RecomputeSettingKey(strconv.FormatInt(a.ID, 10), meterKey)} {
+		var at time.Time
+		if ok, err := r.d.Store.GetSetting(k, &at); err == nil && ok && !at.IsZero() {
+			return at.UTC(), true
+		}
 	}
-	accounts, err := r.store.ListAccounts()
+	return time.Time{}, false
+}
+
+// accountView is an account plus the settings and meters the UI needs.
+type accountView struct {
+	domain.Account
+	CoverageMode string   `json:"coverage_mode"`
+	Meters       []string `json:"meters"`
+	// WeightMeters are the meters with a stored weight fit (/weights is 404
+	// for the others).
+	WeightMeters []string `json:"weight_meters"`
+}
+
+func (r *Router) handleAccounts(url.Values, []byte) abi.ManagementResponse {
+	accounts, err := r.d.Store.ListAccounts()
 	if err != nil {
-		return abi.ErrorResponse(http.StatusInternalServerError, "list accounts: "+err.Error())
+		return serverError("list accounts", err)
 	}
-	if accounts == nil {
-		accounts = []domain.Account{}
+	out := make([]accountView, 0, len(accounts))
+	for _, a := range accounts {
+		v, err := r.accountView(a)
+		if err != nil {
+			return serverError("account "+a.AuthIndex, err)
+		}
+		out = append(out, v)
 	}
-	return abi.JSONResponse(http.StatusOK, map[string]any{"accounts": accounts})
+	return abi.JSONResponse(http.StatusOK, map[string]any{"accounts": out})
 }
 
-func (r *Router) handleEvents(q url.Values) abi.ManagementResponse {
-	if r.store == nil {
-		return abi.ErrorResponse(http.StatusServiceUnavailable, "store not ready")
+func (r *Router) accountView(a domain.Account) (accountView, error) {
+	meters, err := r.d.Store.MeterKeys(a.ID)
+	if err != nil {
+		return accountView{}, err
 	}
-	acct, resp := r.resolveAccount(q.Get("auth_index"))
+	if meters == nil {
+		meters = []string{}
+	}
+	v := accountView{Account: a, CoverageMode: r.coverageMode(a.AuthIndex), Meters: sortMeters(meters), WeightMeters: []string{}}
+	for _, m := range v.Meters {
+		if _, ok, err := r.d.Store.LatestWeightFit(a.ID, m); err != nil {
+			return accountView{}, err
+		} else if ok {
+			v.WeightMeters = append(v.WeightMeters, m)
+		}
+	}
+	return v, nil
+}
+
+func (r *Router) handleEvents(q url.Values, _ []byte) abi.ManagementResponse {
+	acct, resp := r.resolveAccount(q.Get("auth_index"), false)
 	if resp != nil {
 		return *resp
 	}
-	window, resp := parseWindow(q)
+	w, resp := parseWindow(q)
 	if resp != nil {
 		return *resp
 	}
-	events, err := r.store.ListEvents(EventQuery{
-		AccountID: acct.ID,
-		From:      window.from,
-		To:        window.to,
-		Limit:     window.limit,
-		Desc:      window.desc,
-	})
+	events, err := r.d.Store.ListEvents(store.EventQuery{AccountID: acct.ID, From: w.from, To: w.to, Limit: w.limit, Desc: w.desc})
 	if err != nil {
-		return abi.ErrorResponse(http.StatusInternalServerError, "list events: "+err.Error())
+		return serverError("list events", err)
 	}
 	if events == nil {
 		events = []domain.UsageEvent{}
 	}
 	return abi.JSONResponse(http.StatusOK, map[string]any{
-		"account_id": acct.ID,
-		"auth_index": acct.AuthIndex,
-		"count":      len(events),
-		"events":     events,
+		"account_id": acct.ID, "auth_index": acct.AuthIndex, "count": len(events), "events": events,
 	})
 }
 
-func (r *Router) handleReadings(q url.Values) abi.ManagementResponse {
-	if r.store == nil {
-		return abi.ErrorResponse(http.StatusServiceUnavailable, "store not ready")
-	}
-	acct, resp := r.resolveAccount(q.Get("auth_index"))
+func (r *Router) handleReadings(q url.Values, _ []byte) abi.ManagementResponse {
+	acct, resp := r.resolveAccount(q.Get("auth_index"), false)
 	if resp != nil {
 		return *resp
 	}
-	window, resp := parseWindow(q)
+	w, resp := parseWindow(q)
 	if resp != nil {
 		return *resp
 	}
-	readings, err := r.store.ListReadings(ReadingQuery{
+	readings, err := r.d.Store.ListReadings(store.ReadingQuery{
 		AccountID: acct.ID,
 		MeterKey:  strings.TrimSpace(q.Get("meter")),
 		Source:    strings.TrimSpace(q.Get("source")),
-		From:      window.from,
-		To:        window.to,
-		Limit:     window.limit,
-		Desc:      window.desc,
+		From:      w.from, To: w.to, Limit: w.limit, Desc: w.desc,
 	})
 	if err != nil {
-		return abi.ErrorResponse(http.StatusInternalServerError, "list readings: "+err.Error())
+		return serverError("list readings", err)
 	}
 	if readings == nil {
 		readings = []domain.MeterReading{}
 	}
 	return abi.JSONResponse(http.StatusOK, map[string]any{
-		"account_id": acct.ID,
-		"auth_index": acct.AuthIndex,
-		"count":      len(readings),
-		"readings":   readings,
+		"account_id": acct.ID, "auth_index": acct.AuthIndex, "count": len(readings), "readings": readings,
 	})
 }
 
-// resolveAccount maps auth_index to an account; empty means all accounts
-// (zero Account). Unknown auth_index is a 404.
-func (r *Router) resolveAccount(authIndex string) (domain.Account, *abi.ManagementResponse) {
+// resolveAccount maps auth_index to an account. Empty means all accounts
+// (zero Account) unless required, which makes it a 400. Unknown is a 404.
+func (r *Router) resolveAccount(authIndex string, required bool) (domain.Account, *abi.ManagementResponse) {
 	authIndex = strings.TrimSpace(authIndex)
 	if authIndex == "" {
+		if required {
+			return domain.Account{}, bad("auth_index is required")
+		}
 		return domain.Account{}, nil
 	}
-	acct, ok, err := r.store.GetAccountByAuthIndex(authIndex)
+	acct, ok, err := r.d.Store.GetAccountByAuthIndex(authIndex)
 	if err != nil {
-		resp := abi.ErrorResponse(http.StatusInternalServerError, "lookup account: "+err.Error())
+		resp := serverError("lookup account", err)
 		return domain.Account{}, &resp
 	}
 	if !ok {
@@ -327,7 +412,7 @@ func parseWindow(q url.Values) (window, *abi.ManagementResponse) {
 	if !w.from.IsZero() && !w.to.IsZero() && w.to.Before(w.from) {
 		return w, bad("to is before from")
 	}
-	if w.limit, err = parseLimit(q.Get("limit")); err != nil {
+	if w.limit, err = parseLimit(q.Get("limit"), defaultLimit, maxLimit); err != nil {
 		return w, bad("limit: " + err.Error())
 	}
 	switch strings.ToLower(strings.TrimSpace(q.Get("order"))) {
@@ -344,6 +429,14 @@ func parseWindow(q url.Values) (window, *abi.ManagementResponse) {
 func bad(msg string) *abi.ManagementResponse {
 	resp := abi.ErrorResponse(http.StatusBadRequest, msg)
 	return &resp
+}
+
+func serverError(what string, err error) abi.ManagementResponse {
+	return abi.ErrorResponse(http.StatusInternalServerError, what+": "+err.Error())
+}
+
+func unavailable(msg string) abi.ManagementResponse {
+	return abi.ErrorResponse(http.StatusServiceUnavailable, msg)
 }
 
 // parseTime accepts RFC3339 or unix seconds (milliseconds when > 1e12).
@@ -364,20 +457,31 @@ func parseTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time %q (want RFC3339 or unix seconds)", s)
 }
 
-func parseLimit(s string) (int, error) {
+// parseLimit reads a positive integer, def when empty or < 1, capped at max.
+func parseLimit(s string, def, max int) (int, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return defaultLimit, nil
+		return def, nil
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil {
 		return 0, fmt.Errorf("invalid integer %q", s)
 	}
 	if n < 1 {
-		return defaultLimit, nil
+		return def, nil
 	}
-	if n > maxLimit {
-		return maxLimit, nil
+	return min(n, max), nil
+}
+
+// parseID reads an optional positive int64 parameter; 0 when empty.
+func parseID(name, s string) (int64, *abi.ManagementResponse) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, bad(name + ": want a positive integer")
 	}
 	return n, nil
 }
@@ -395,4 +499,21 @@ func uptimeSeconds(started, now time.Time) int64 {
 		return 0
 	}
 	return int64(now.Sub(started) / time.Second)
+}
+
+func jobContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), jobTimeout)
+}
+
+// decodeBody unmarshals a JSON request body; an empty body is an error.
+func decodeBody(body []byte, v any) *abi.ManagementResponse {
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return bad("request body is empty")
+	}
+	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return bad("invalid JSON body: " + err.Error())
+	}
+	return nil
 }

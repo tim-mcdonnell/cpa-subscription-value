@@ -5,69 +5,136 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Subscription Value</title>
 <style>
+/* ==== theme tokens (light default; dark via OS or data-theme) ==== */
 :root {
   color-scheme: light dark;
-  --bg: #f4f5f7; --card: #ffffff; --fg: #1b1f24; --muted: #6b7280; --line: #e2e5ea;
+  --bg: #f4f5f7; --card: #ffffff; --fg: #1b1f24; --fg2: #52514e; --muted: #6b7280; --line: #e2e5ea;
+  --grid: #eceae4; --axis: #c3c2b7;
   --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --soft: #eef2ff;
+  /* categorical slots (validated: dataviz reference palette, slots 1-3) */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --neutral: #a8a7a0;
+  /* status palette, fixed in both themes; always paired with an icon + label */
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1115; --card: #181b21; --fg: #e6e8eb; --muted: #98a2ad; --line: #2a2f38;
+    --bg: #0f1115; --card: #181b21; --fg: #e6e8eb; --fg2: #c3c2b7; --muted: #98a2ad; --line: #2a2f38;
+    --grid: #262a31; --axis: #3a3f48;
     --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --soft: #1e2533;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --neutral: #5d5c57;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1115; --card: #181b21; --fg: #e6e8eb; --muted: #98a2ad; --line: #2a2f38;
+  --bg: #0f1115; --card: #181b21; --fg: #e6e8eb; --fg2: #c3c2b7; --muted: #98a2ad; --line: #2a2f38;
+  --grid: #262a31; --axis: #3a3f48;
   --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --soft: #1e2533;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --neutral: #5d5c57;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--font); }
-body { padding: 12px 16px 32px; max-width: 1200px; margin: 0 auto; }
+body { padding: 12px 16px 32px; max-width: 1240px; margin: 0 auto; }
+body.loading main { opacity: .6; transition: opacity .2s; }
 h1 { font-size: 18px; margin: 0; }
-h2 { font-size: 14px; margin: 20px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+h2 { font-size: 13px; margin: 0 0 2px; color: var(--fg2); text-transform: uppercase; letter-spacing: .04em; }
 h3 { font-size: 14px; margin: 0 0 6px; }
-header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+p.sub { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 #status { color: var(--muted); font-size: 12px; }
 #status.err { color: var(--bad); }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
-.card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-.card .v { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; word-break: break-all; }
-.card .s { color: var(--muted); font-size: 12px; }
-.panel { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 8px; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 10px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 0 10px; }
 .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; }
-th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
-td.mono { font-family: var(--mono); font-size: 12px; }
+td.mono, .mono { font-family: var(--mono); font-size: 12px; }
 tr:last-child td { border-bottom: 0; }
-.badge { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 18px; background: var(--soft); color: var(--accent); }
-.badge.claude { color: var(--warn); }
-.badge.codex { color: var(--ok); }
-.bad { color: var(--bad); }
 .muted { color: var(--muted); }
-.meters { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-.meter { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
-.meter .row { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-.meter .pct { font-size: 22px; font-variant-numeric: tabular-nums; }
-.meter svg { display: block; width: 100%; height: 44px; margin-top: 6px; }
-.meter .foot { color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-#keyForm { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-#keyForm input { flex: 1 1 240px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
-button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; cursor: pointer; }
+.bad { color: var(--bad); }
+.empty { color: var(--muted); padding: 10px 0; }
+button, select, input { font: inherit; color: var(--fg); }
+button { padding: 5px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; }
+button:hover { background: var(--soft); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+select, input { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 [hidden] { display: none !important; }
-.empty { color: var(--muted); padding: 8px 0; }
-@media (max-width: 480px) { body { padding: 8px 10px 24px; } .card .v { font-size: 17px; } }
+/* ==== badges ==== */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; font-size: 11px; line-height: 18px; background: var(--soft); color: var(--fg2); white-space: nowrap; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.chip { display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--line); border-radius: 4px; font-size: 11px; color: var(--fg2); }
+.chip.info { border-style: dotted; color: var(--muted); }
+/* ==== account cards (panel 1) ==== */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 10px; }
+.acct { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+.acct .top { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.acct .who { font-weight: 600; }
+.hero { margin: 10px 0 6px; }
+.hero .v { font-size: 34px; font-weight: 600; line-height: 1.1; }
+.hero .v small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.hero .ci { color: var(--fg2); font-size: 12px; margin-top: 2px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.stat .val { font-size: 17px; }
+.stat .s { color: var(--muted); font-size: 12px; }
+.meterbar { height: 6px; border-radius: 3px; background: var(--grid); margin-top: 4px; position: relative; overflow: hidden; }
+.meterbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+.meterbar b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--fg2); }
+.note { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.note.warn { color: var(--fg); border-left: 3px solid var(--warning); padding-left: 8px; }
+.secondary { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--fg2); }
+/* ==== filters ==== */
+.filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 14px; padding: 8px 0; position: sticky; top: env(safe-area-inset-top, 0px); background: var(--bg); z-index: 2; }
+.filters label { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--fg2); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 12px; }
+.seg button[aria-pressed="true"] { background: var(--soft); font-weight: 600; }
+/* ==== charts ==== */
+.chart { position: relative; width: 100%; min-height: 60px; }
+.chart svg { display: block; font-size: 11px; }
+.chart .ax { fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .base { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .xh { stroke: var(--fg2); stroke-width: 1; opacity: .5; }
+.chart .hit { fill: transparent; cursor: default; outline: none; }
+.chart .hit:hover + .mk, .chart .hit:focus + .mk { opacity: .75; }
+.chart .glyph { fill: var(--fg2); font-size: 11px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg2); margin: 6px 0 2px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.key { display: inline-block; width: 14px; height: 0; border-top: 2px solid; }
+.key.dash { border-top-style: dashed; }
+.key.dot3 { border-top-style: dotted; }
+details.tbl { margin-top: 6px; font-size: 12px; }
+details.tbl summary { cursor: pointer; color: var(--muted); }
+#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.15); max-width: 280px; }
+#tip .row { display: flex; align-items: center; gap: 6px; }
+#tip strong { font-variant-numeric: tabular-nums; }
+#tip .lbl { color: var(--muted); }
+/* ==== mix + weights ==== */
+.mix { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px 24px; }
+.mixrow { display: grid; grid-template-columns: minmax(90px, 34%) 1fr; gap: 2px 8px; align-items: center; margin: 5px 0; font-size: 12px; }
+.mixrow .bars { display: grid; gap: 2px; }
+.mixbar { display: flex; align-items: center; gap: 6px; }
+.mixbar i { display: block; height: 8px; border-radius: 0 4px 4px 0; min-width: 1px; }
+.mixbar span { font-variant-numeric: tabular-nums; color: var(--fg2); }
+/* ==== settings ==== */
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px 24px; }
+.settings .row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 6px 0; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 12px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; }
+#keyForm { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#keyForm input { flex: 1 1 240px; }
+@media (max-width: 600px) { .filters { position: static; } }
+@media (max-width: 480px) { body { padding: 8px 16px 24px; } .hero .v { font-size: 28px; } }
 </style>
 </head>
 <body>
 <header>
   <h1>Subscription Value</h1>
-  <div id="status">loading…</div>
+  <div><span id="status">loading…</span> <button id="refreshBtn" type="button">Refresh</button></div>
 </header>
 
 <section id="auth" class="panel" hidden>
@@ -79,33 +146,103 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   </form>
 </section>
 
-<h2>Health</h2>
-<div id="health" class="cards"></div>
+<main>
+  <section id="cards" class="cards" aria-label="Accounts"></section>
 
-<h2>Accounts</h2>
-<div class="panel scroll"><div id="accounts"></div></div>
+  <div class="filters" id="filters">
+    <label>Account <select id="selAccount"></select></label>
+    <label>Meter <select id="selMeter"></select></label>
+    <label>Week over week <span class="seg" id="wowSeg" role="group" aria-label="Providers shown"></span></label>
+  </div>
 
-<h2>Latest meter readings</h2>
-<div id="meters"></div>
+  <section class="panel">
+    <h2>Week over week</h2>
+    <p class="sub">$ per 100% of the weekly meter, one point per cycle, 95% CI bars. Hollow = cycle still running.</p>
+    <div id="wowLegend" class="legend"></div>
+    <div id="wow" class="chart"></div>
+    <details class="tbl"><summary>Data table</summary><div class="scroll" id="wowTable"></div></details>
+  </section>
 
-<h2>Recent events</h2>
-<div class="panel scroll"><div id="events"></div></div>
+  <div class="grid2">
+    <section class="panel">
+      <h2>Current cycle pace</h2>
+      <p class="sub" id="paceSub"></p>
+      <div id="paceLegend" class="legend"></div>
+      <div id="pace" class="chart"></div>
+      <details class="tbl"><summary>Data table</summary><div class="scroll" id="paceTable"></div></details>
+    </section>
+    <section class="panel">
+      <h2>$ vs %</h2>
+      <p class="sub" id="dvpSub"></p>
+      <div id="dvpLegend" class="legend"></div>
+      <div id="dvp" class="chart"></div>
+      <details class="tbl"><summary>Data table</summary><div class="scroll" id="dvpTable"></div></details>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Per-model weights</h2>
+    <p class="sub" id="wSub"></p>
+    <div id="weights"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Mix</h2>
+    <p class="sub" id="mixSub"></p>
+    <div id="mixLegend" class="legend"></div>
+    <div id="mix" class="mix"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Settings</h2>
+    <div id="settings" class="settings"></div>
+  </section>
+
+  <details class="panel" id="diag">
+    <summary><h2 style="display:inline">Diagnostics</h2></summary>
+    <div id="health" class="kv" style="margin-top:8px"></div>
+    <h3 style="margin-top:12px">Recent events</h3>
+    <div class="scroll"><div id="events"></div></div>
+  </details>
+</main>
+<div id="tip" hidden></div>
 
 <script>
 'use strict';
+// ==== constants ====
 const PLUGIN_ID = 'cpa-subscription-value';
 const API = location.origin + '/v0/management/' + PLUGIN_ID;
 const SESSION_KEY = 'csv-management-key';
-const REFRESH_MS = 60000;
+const PREFS_KEY = 'csv-dashboard-selection';
 const EVENT_LIMIT = 50;
-const READING_LIMIT = 200;
+const FLAG_GLYPHS = {
+  regime_change: ['◆', 'Regime change: the reset anchor flipped back and forth; affected segments excluded'],
+  pricing_changed: ['$', 'Pricing changed: events in this cycle were priced under two price tables'],
+  level_shift: ['↕', 'Level shift: V̂ moved more than 3 SE from the previous cycle'],
+  low_coverage: ['◌', 'Low coverage: >15% of ticks unexplained by proxied $, a poll-detected gap, or poll-only method'],
+};
+const INFO_FLAGS = {
+  regime_split: 'mix drift within the cycle (informational; fires on ordinary mix changes)',
+  lag_unstable: 'lag choice not clear-cut (informational)',
+  few_blocks: 'few bootstrap blocks; CI less reliable',
+  precision_change: 'header precision changed mid-cycle',
+  long_gap: 'long quiet period inside a segment',
+  failed_tokens: 'includes failed attempts that carried tokens',
+};
+const GRADES = { high: ['good', 'high'], medium: ['warning', 'medium'], low: ['serious', 'low'], insufficient: ['neutral', 'insufficient'] };
+const STATUS = { exhausted: ['critical', '✕', 'exhausted'], ahead: ['serious', '▲', 'fast'], on_track: ['good', '●', 'on track'], under: ['neutral', '▼', 'slow'] };
 
-(function applyTheme() {
-  const t = new URLSearchParams(location.search).get('theme');
+// ==== theme ====
+function applyTheme() {
+  let t = new URLSearchParams(location.search).get('theme');
+  if (t !== 'dark' && t !== 'light') {
+    try { t = parent !== window ? parent.document.documentElement.dataset.theme : ''; } catch (_) { t = ''; }
+  }
   if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
-})();
+}
+applyTheme();
 
-// ---- management key (mirrors CPAMC's secure-storage scheme) ----
+// ==== management key (mirrors CPAMC's secure-storage scheme) ====
 function decodeCPAMC(raw) {
   const prefix = 'enc::v1::';
   if (!raw.startsWith(prefix)) return raw;
@@ -139,49 +276,220 @@ function readKey() {
 function saveKey(k) { try { sessionStorage.setItem(SESSION_KEY, k); } catch (_) {} }
 function dropKey() { try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {} }
 
-// ---- api ----
+// ==== api ====
 class AuthError extends Error {}
-async function api(path, key) {
-  const res = await fetch(API + path, { headers: { Authorization: 'Bearer ' + key }, cache: 'no-store' });
+class NotFound extends Error {}
+async function request(path, opts = {}) {
+  const res = await fetch(API + path, { cache: 'no-store', ...opts, headers: { Authorization: 'Bearer ' + key, ...(opts.headers || {}) } });
   if (res.status === 401 || res.status === 403) throw new AuthError('management key rejected (' + res.status + ')');
+  return res;
+}
+async function api(path, opts) {
+  const res = await request(path, opts);
   const body = await res.json().catch(() => ({}));
+  if (res.status === 404) throw new NotFound(body.error || 'not found');
   if (!res.ok) throw new Error(body.error || (path + ' returned ' + res.status));
   return body;
 }
+const apiMaybe = path => api(path).catch(e => { if (e instanceof NotFound) return null; throw e; });
+const apiPost = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+const qs = o => '?' + new URLSearchParams(Object.entries(o).filter(([, v]) => v != null && v !== '')).toString();
 
-// ---- formatting ----
+// ==== formatting ====
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const nf = new Intl.NumberFormat();
+const nf = new Intl.NumberFormat('en-US');
+const usdFmt = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInt = n => nf.format(Math.round(n || 0));
-const fmtUSD = n => '$' + (n || 0).toFixed(n >= 100 ? 2 : 4);
-const fmtPct = f => (f * 100).toFixed(1) + '%';
+const fmtUSD = n => n == null || !isFinite(n) ? '—' : (n < 0 ? '−$' : '$') + usdFmt.format(Math.abs(n));
+const fmtUSDAxis = n => '$' + nf.format(Math.round(n));
+const fmtPct = f => f == null || !isFinite(f) ? '—' : (f * 100).toFixed(1) + '%';
+const fmtX = f => f == null ? '—' : f.toFixed(2) + '×';
+const fmtRange = (lo, hi) => lo == null || hi == null ? '' : fmtUSD(lo) + '–' + fmtUSD(hi);
+const fmtPM = (v, lo, hi) => v ? '±' + ((hi - lo) / (2 * v) * 100).toFixed(1) + '%' : '';
 const fmtBytes = b => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MiB' : b >= 1024 ? (b / 1024).toFixed(0) + ' KiB' : (b || 0) + ' B';
-function fmtTime(s) {
+const ms = s => s ? new Date(s).getTime() : NaN;
+function fmtTime(s, withYear) {
   if (!s) return '—';
   const d = new Date(s);
-  return isNaN(d) ? '—' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return isNaN(d) ? '—' : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', ...(withYear ? { year: 'numeric' } : {}) });
 }
-function fmtAgo(s) {
-  if (!s) return 'never';
-  const sec = Math.max(0, (Date.now() - new Date(s).getTime()) / 1000);
-  return fmtDur(sec) + ' ago';
-}
+const fmtDay = s => new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 function fmtDur(sec) {
+  sec = Math.abs(sec);
   if (sec < 90) return Math.round(sec) + 's';
   if (sec < 5400) return Math.round(sec / 60) + 'm';
   if (sec < 172800) return (sec / 3600).toFixed(1) + 'h';
   return (sec / 86400).toFixed(1) + 'd';
 }
+const fmtAgo = s => s ? fmtDur((Date.now() - ms(s)) / 1000) + ' ago' : 'never';
+const fmtIn = s => s ? 'in ' + fmtDur((ms(s) - Date.now()) / 1000) : '—';
+const fmtMeter = m => ({ '7d': 'weekly', '5h': '5-hour', '7d_oi': 'weekly (Fable)' }[m] || m);
 
-// ---- SVG helpers (extend here in Phase 2) ----
+function badge(kind, icon, label, title) {
+  const color = kind === 'neutral' ? 'var(--neutral)' : 'var(--' + kind + ')';
+  return `<span class="badge"${title ? ` title="${esc(title)}"` : ''}><i class="dot" style="background:${color}"></i>${icon ? esc(icon) + ' ' : ''}${esc(label)}</span>`;
+}
+const gradeBadge = g => g ? badge(GRADES[g] ? GRADES[g][0] : 'neutral', '', 'grade: ' + g, 'estimate confidence') : '';
+function statusBadge(s) { const d = STATUS[s]; return d ? badge(d[0], d[1], d[2], 'pace vs. the reset') : ''; }
+const acctDot = a => `<i class="dot" style="background:${colorOf(a.auth_index)}"></i>`;
+function collectingText(c) {
+  if (!c) return 'collecting';
+  return `collecting: ${c.ticks_used} of ${c.ticks_needed} ticks, ${c.crossings} of ${c.crossings_needed} crossings needed`;
+}
+function flagChips(flags, skip = []) {
+  return (flags || []).filter(f => !skip.includes(f)).map(f => {
+    const g = FLAG_GLYPHS[f], info = INFO_FLAGS[f];
+    return `<span class="chip${g ? '' : ' info'}" title="${esc(g ? g[1] : info || f)}">${g ? esc(g[0]) + ' ' : ''}${esc(f.replace(/_/g, ' '))}${info ? ' · info' : ''}</span>`;
+  }).join('');
+}
+
+// ==== state ====
+let key = readKey();
+const S = {
+  health: null, summary: [], settings: null, prices: null,
+  wowCycles: {}, // auth_index → /cycles (7d)
+  selCycles: null, series: null, weights: null, events: [],
+  sel: loadSel(), wowView: null, busy: false, msg: '',
+};
+function loadSel() { try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (_) { return {}; } }
+function saveSel() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(S.sel)); } catch (_) {} }
+const accounts = () => S.summary.map(s => s.account);
+const summaryOf = auth => S.summary.find(s => s.account.auth_index === auth);
+function colorOf(auth) {
+  const i = accounts().findIndex(a => a.auth_index === auth);
+  return 'var(--s' + ((i < 0 ? 0 : i) % 3 + 1) + ')';
+}
+const acctLabel = a => a.provider + (a.email ? ' · ' + a.email : ' · ' + a.auth_index);
+
+// ==== data loading ====
+async function load() {
+  const [health, sum, settings] = await Promise.all([api('/health'), api('/summary'), api('/settings')]);
+  S.health = health; S.summary = sum.accounts || []; S.settings = settings;
+  if (!S.wowView) S.wowView = (settings.display && settings.display.wow_view) || 'both';
+  const accts = accounts();
+  if (!accts.some(a => a.auth_index === S.sel.auth)) S.sel.auth = accts.length ? accts[0].auth_index : '';
+  const meters = selMeters();
+  if (!meters.includes(S.sel.meter)) S.sel.meter = meters[0] || '7d';
+  const shown = (settings.display && settings.display.cycles_shown) || 12;
+  const auth = S.sel.auth, selAcct = accts.find(a => a.auth_index === auth);
+  const selMeter = summaryOf(auth) && summaryOf(auth).meters.find(m => m.meter === S.sel.meter);
+  const [wow, selCycles, series, weights, events] = await Promise.all([
+    Promise.all(accts.map(a => apiMaybe('/cycles' + qs({ auth_index: a.auth_index, meter: '7d', limit: shown })))),
+    auth ? apiMaybe('/cycles' + qs({ auth_index: auth, meter: S.sel.meter, limit: 2 })) : null,
+    selMeter && selMeter.cycle ? apiMaybe('/series' + qs({ auth_index: auth, meter: S.sel.meter })) : null,
+    selAcct && selAcct.weight_meters.includes(S.sel.meter) ? apiMaybe('/weights' + qs({ auth_index: auth, meter: S.sel.meter })) : null,
+    $('#diag').open ? api('/events' + qs({ limit: EVENT_LIMIT })) : null,
+  ]);
+  S.wowCycles = Object.fromEntries(accts.map((a, i) => [a.auth_index, wow[i]]));
+  S.selCycles = selCycles; S.series = series; S.weights = weights;
+  if (events) S.events = events.events || [];
+}
+function selMeters() {
+  const s = summaryOf(S.sel.auth);
+  return s ? s.meters.map(m => m.meter) : [];
+}
+
+// ==== view models (API → what each panel draws) ====
+function vmCard(s) {
+  const m = s.meters.find(x => x.meter === '7d') || s.meters[0] || null;
+  const est = m && m.latest_estimate, f = m && m.forecast, cyc = m && m.cycle;
+  const vm = { a: s.account, mode: s.coverage_mode, reason: s.capacity_disabled_reason, meter: m, est, f, cyc, others: s.meters.filter(x => x !== m) };
+  vm.open = !!(cyc && cyc.open);
+  vm.used = vm.open ? m.used_fraction : null;
+  vm.pTime = f ? f.p_time : null;
+  vm.vhat = est && est.v_hat;
+  vm.insufficient = !est || est.grade === 'insufficient';
+  return vm;
+}
+function vmWow() {
+  const view = S.wowView;
+  const series = accounts().filter(a => view === 'both' || a.provider === view).map(a => {
+    const c = S.wowCycles[a.auth_index];
+    const pts = ((c && c.cycles) || []).filter(x => x.estimate && x.estimate.v_hat > 0).map(x => {
+      const glyphs = Object.keys(FLAG_GLYPHS).filter(k => k === 'low_coverage' ? x.low_coverage : x.flags.includes(k));
+      return { x: ms(x.closed_at || x.reset_at), v: x.estimate.v_hat, lo: x.estimate.ci_lo, hi: x.estimate.ci_hi, open: x.open, grade: x.estimate.grade, glyphs, c: x };
+    }).reverse();
+    return { a, color: colorOf(a.auth_index), pts };
+  });
+  return series;
+}
+function vmPace() {
+  const sr = S.series, s = summaryOf(S.sel.auth);
+  if (!sr) return null;
+  const m = s && s.meters.find(x => x.meter === S.sel.meter);
+  const c = sr.cycle, t0 = ms(c.starts_at), t1 = ms(c.reset_at), now = ms(sr.now);
+  const f = c.open && m && m.forecast && m.cycle && m.cycle.cycle_id === c.cycle_id ? m.forecast : null;
+  const proj = [];
+  if (f && now < t1) {
+    const end = f.t_exhaust ? Math.min(t1, ms(f.t_exhaust)) : t1;
+    const rate = f.burn_per_hour / 3600000;
+    proj.push({ kind: 'recent', pts: [[now, f.u_now], [end, Math.min(1, f.u_now + rate * (end - now))]] });
+    const avg = now > t0 ? f.u_now / (now - t0) : 0;
+    const endA = avg > 0 ? Math.min(t1, now + (1 - f.u_now) / avg) : t1;
+    proj.push({ kind: 'average', pts: [[now, f.u_now], [endA, Math.min(1, f.u_now + avg * (endA - now))]] });
+  }
+  return { c, t0, t1, now: c.open ? now : null, header: sr.readings.header, poll: sr.readings.poll, cum: sr.cumulative_usd, proj, f, color: colorOf(S.sel.auth) };
+}
+function vmDollar() {
+  const sr = S.series;
+  if (!sr || !sr.baseline) return null;
+  const pts = [{ u: sr.baseline.u, usd: 0, used: true, base: true, t: sr.baseline.t }]
+    .concat(sr.crossings.map(x => ({ u: x.u, usd: x.cum_usd, used: x.used, t: x.t, flags: x.flags, d: x.usd, dt: x.delta_ticks })));
+  return { pts, fit: sr.fit, lag: sr.lag, color: colorOf(S.sel.auth) };
+}
+function vmMix() {
+  const cs = (S.selCycles && S.selCycles.cycles) || [];
+  const s = summaryOf(S.sel.auth), m = s && s.meters.find(x => x.meter === S.sel.meter);
+  let cur = cs[0] && cs[0].mix, last = cs[1] && cs[1].mix;
+  if ((!cur || !Object.keys(cur.by_family).length) && m) cur = m.mix;
+  const dims = ['by_family', 'by_type'].map(dim => {
+    const keys = [...new Set([...Object.keys((cur && cur[dim]) || {}), ...Object.keys((last && last[dim]) || {})])];
+    keys.sort((a, b) => ((cur && cur[dim][b]) || 0) - ((cur && cur[dim][a]) || 0) || a.localeCompare(b));
+    return { dim, rows: keys.map(k => ({ k, cur: cur ? cur[dim][k] || 0 : null, last: last ? last[dim][k] || 0 : null })) };
+  });
+  return { cur, last, dims, color: colorOf(S.sel.auth) };
+}
+
+// ==== chart kit (hand-written SVG) ====
 const SVG = {
   ns: 'http://www.w3.org/2000/svg',
   scale(values, lo, hi, outLo, outHi) {
     if (hi === lo) return () => (outLo + outHi) / 2;
     return v => outLo + (v - lo) / (hi - lo) * (outHi - outLo);
   },
-  // points: [{x, y}] in data units; returns an <svg> string.
+  lin(lo, hi, a, b) { const f = SVG.scale(null, lo, hi, a, b); f.inv = p => hi === lo ? lo : lo + (p - a) / (b - a) * (hi - lo); return f; },
+  // nice ticks: ≤ n round values spanning [lo, hi]
+  ticks(lo, hi, n = 5) {
+    if (!(hi > lo)) return [lo];
+    const raw = (hi - lo) / n, p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw) || 10 * p;
+    const out = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9 * step; v += step) out.push(+v.toFixed(10));
+    return out;
+  },
+  niceMax(v, n = 5) { const t = SVG.ticks(0, v, n); return t[t.length - 1] < v ? t[t.length - 1] + (t[1] - t[0]) : t[t.length - 1]; },
+  timeTicks(lo, hi, n = 6) {
+    const H = 3600000, D = 24 * H;
+    const step = [H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 28 * D].find(s => (hi - lo) / s <= n) || 56 * D;
+    const d = new Date(lo);
+    if (step >= D) d.setHours(0, 0, 0, 0); else d.setMinutes(0, 0, 0);
+    let t = d.getTime();
+    if (step < D) t -= (new Date(t).getHours() % (step / H)) * H;
+    const out = [];
+    for (; t <= hi; t += step) if (t >= lo) out.push(t);
+    return { ticks: out, fmt: step >= D ? (v => fmtDay(v)) : (v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })) };
+  },
+  gridY(sy, ticks, x0, x1, fmt) {
+    return ticks.map(v => `<line class="grid" x1="${x0}" x2="${x1}" y1="${sy(v).toFixed(1)}" y2="${sy(v).toFixed(1)}"/>` +
+      `<text class="ax" x="${x0 - 6}" y="${(sy(v) + 3.5).toFixed(1)}" text-anchor="end">${esc(fmt(v))}</text>`).join('');
+  },
+  axisX(sx, ticks, y, fmt, x0, x1) {
+    return `<line class="base" x1="${x0}" x2="${x1}" y1="${y}" y2="${y}"/>` + ticks.map(v =>
+      `<text class="ax" x="${sx(v).toFixed(1)}" y="${y + 15}" text-anchor="middle">${esc(fmt(v))}</text>`).join('');
+  },
+  path(pts, sx, sy) { return pts.map((p, i) => (i ? 'L' : 'M') + sx(p[0]).toFixed(1) + ' ' + sy(p[1]).toFixed(1)).join(''); },
+  // sparkline: points [{x, y}] in data units; returns an <svg> string.
   line(points, opts = {}) {
     const w = opts.width || 240, h = opts.height || 44, pad = opts.pad ?? 2;
     if (!points.length) return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"></svg>`;
@@ -190,124 +498,416 @@ const SVG = {
     const yMin = opts.yMin ?? Math.min(...ys), yMax = opts.yMax ?? Math.max(...ys);
     const sx = SVG.scale(xs, xMin, xMax, pad, w - pad), sy = SVG.scale(ys, yMin, yMax, h - pad, pad);
     const d = points.map((p, i) => (i ? 'L' : 'M') + sx(p.x).toFixed(1) + ' ' + sy(p.y).toFixed(1)).join(' ');
-    const area = opts.fill ? `<path d="${d} L${sx(xMax).toFixed(1)} ${h - pad} L${sx(xMin).toFixed(1)} ${h - pad} Z" fill="${opts.fill}" opacity=".15"/>` : '';
-    const last = points[points.length - 1];
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(opts.label || '')}">
-      ${opts.guides ? opts.guides.map(g => `<line x1="${pad}" x2="${w - pad}" y1="${sy(g).toFixed(1)}" y2="${sy(g).toFixed(1)}" stroke="currentColor" opacity=".15" stroke-dasharray="3 3"/>`).join('') : ''}
-      ${area}<path d="${d}" fill="none" stroke="${opts.stroke || 'var(--accent)'}" stroke-width="${opts.strokeWidth || 1.5}" vector-effect="non-scaling-stroke"/>
-      <circle cx="${sx(last.x).toFixed(1)}" cy="${sy(last.y).toFixed(1)}" r="2" fill="${opts.stroke || 'var(--accent)'}"/>
-    </svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(opts.label || '')}"><path d="${d}" fill="none" stroke="${opts.stroke || 'var(--accent)'}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   },
   // values: [number]; equal-width bars from a zero baseline.
   bars(values, opts = {}) {
-    const w = opts.width || 240, h = opts.height || 44, pad = opts.pad ?? 2, gap = opts.gap ?? 1;
+    const w = opts.width || 240, h = opts.height || 44, pad = opts.pad ?? 2, gap = opts.gap ?? 2;
     if (!values.length) return `<svg viewBox="0 0 ${w} ${h}"></svg>`;
-    const yMax = opts.yMax ?? Math.max(0, ...values), yMin = Math.min(0, ...values);
-    const sy = SVG.scale(values, yMin, yMax, h - pad, pad), bw = (w - 2 * pad) / values.length;
-    const rects = values.map((v, i) => {
-      const y0 = sy(0), y1 = sy(v);
-      return `<rect x="${(pad + i * bw).toFixed(1)}" y="${Math.min(y0, y1).toFixed(1)}" width="${Math.max(0.5, bw - gap).toFixed(1)}" height="${Math.abs(y0 - y1).toFixed(1)}" fill="${opts.fill || 'var(--accent)'}"/>`;
-    }).join('');
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${rects}</svg>`;
-  }
+    const yMax = opts.yMax ?? Math.max(0, ...values);
+    const sy = SVG.scale(values, 0, yMax, h - pad, pad), bw = (w - 2 * pad) / values.length;
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${values.map((v, i) =>
+      `<rect x="${(pad + i * bw).toFixed(1)}" y="${sy(v).toFixed(1)}" width="${Math.max(0.5, bw - gap).toFixed(1)}" height="${(sy(0) - sy(v)).toFixed(1)}" fill="${opts.fill || 'var(--accent)'}"/>`).join('')}</svg>`;
+  },
 };
+function widthOf(el) { return Math.max(280, Math.floor(el.clientWidth || el.parentElement.clientWidth || 600)); }
+function nearest(xs, x) {
+  let lo = 0, hi = xs.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] < x) lo = mid; else hi = mid; }
+  return Math.abs(xs[lo] - x) <= Math.abs(xs[hi] - x) ? lo : hi;
+}
+function valueAt(pts, t) { // last value at or before t (step), for [t, v] series
+  if (!pts || !pts.length || t < pts[0][0]) return null;
+  return pts[nearestBefore(pts, t)][1];
+}
+function nearestBefore(pts, t) {
+  let lo = 0, hi = pts.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (pts[mid][0] <= t) lo = mid; else hi = mid - 1; }
+  return lo;
+}
 
-// ---- rendering ----
-function card(k, v, s) { return `<div class="card"><div class="k">${esc(k)}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`; }
-function renderHealth(h) {
-  const st = h.store || {};
-  $('#health').innerHTML = [
-    card('Plugin', esc(h.plugin_version || '?'), 'schema v' + esc(h.schema_version ?? '?')),
-    card('Uptime', esc(fmtDur(h.uptime_s || 0)), 'since ' + esc(fmtTime(h.started_at))),
-    card('Events', fmtInt(st.events), st.oldest_event ? esc(fmtTime(st.oldest_event)) + ' → ' + esc(fmtTime(st.newest_event)) : 'none yet'),
-    card('Readings', fmtInt(st.readings), fmtInt(st.accounts) + ' account' + (st.accounts === 1 ? '' : 's')),
-    card('Ingest', `<span class="${h.ingest && h.ingest.dropped ? 'bad' : ''}">${fmtInt(h.ingest && h.ingest.dropped)}</span> dropped`, 'queued ' + fmtInt(h.ingest && h.ingest.queued)),
-    card('Last event', esc(fmtAgo(h.ingest && h.ingest.last_event_at)), esc(fmtTime(h.ingest && h.ingest.last_event_at))),
-    card('Database', esc(fmtBytes(st.db_bytes)), h.error ? `<span class="bad">${esc(h.error)}</span>` : 'ok'),
-  ].join('');
+// ---- tooltip ----
+const tip = $('#tip');
+function showTip(html, x, y) {
+  tip.innerHTML = html; tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.max(4, Math.min(innerWidth - r.width - 4, x + 12)) + 'px';
+  tip.style.top = Math.max(4, y - r.height - 12 < 0 ? y + 16 : y - r.height - 12) + 'px';
 }
-function providerBadge(p) { return `<span class="badge ${esc(p)}">${esc(p)}</span>`; }
-function renderAccounts(accounts) {
-  if (!accounts.length) { $('#accounts').innerHTML = '<div class="empty">No accounts yet. They appear after the first request flows through CPA.</div>'; return; }
-  $('#accounts').innerHTML = `<table><thead><tr><th>Provider</th><th>Auth index</th><th>Auth file</th><th>Email</th><th>Plan</th><th>First seen</th><th>Last seen</th></tr></thead><tbody>` +
-    accounts.map(a => `<tr>
-      <td>${providerBadge(a.provider)}</td><td class="mono">${esc(a.auth_index)}</td><td class="mono">${esc(a.auth_id)}</td>
-      <td>${esc(a.email || '—')}</td><td>${esc(a.plan_type || '—')}</td><td>${esc(fmtTime(a.first_seen))}</td><td>${esc(fmtTime(a.last_seen))}</td></tr>`).join('') +
-    '</tbody></table>';
+function hideTip() { tip.hidden = true; }
+const tipRow = (value, label, color, dash) => `<div class="row">${color ? `<i class="key${dash ? ' dash' : ''}" style="border-color:${color}"></i>` : ''}<strong>${esc(value)}</strong> <span class="lbl">${esc(label)}</span></div>`;
+// Crosshair over a plot: xs are data x values, px maps them to pixels.
+function bindCrosshair(el, xs, px, top, bottom, rows) {
+  const svg = el.querySelector('svg'), line = svg && svg.querySelector('.xh');
+  if (!svg || !xs.length) return;
+  svg.addEventListener('pointermove', e => {
+    const r = svg.getBoundingClientRect(), x = e.clientX - r.left;
+    const i = nearest(xs.map(px), x);
+    line.setAttribute('x1', px(xs[i])); line.setAttribute('x2', px(xs[i]));
+    line.setAttribute('y1', top); line.setAttribute('y2', bottom); line.style.display = '';
+    showTip(rows(i), e.clientX, e.clientY);
+  });
+  svg.addEventListener('pointerleave', () => { line.style.display = 'none'; hideTip(); });
 }
-// readings arrive newest-first; group by meter+source, keep the latest and a sparkline series.
-function groupReadings(readings) {
-  const groups = new Map();
-  for (const r of readings) {
-    const k = r.meter_key + '|' + r.source;
-    let g = groups.get(k);
-    if (!g) { g = { meter: r.meter_key, source: r.source, latest: r, series: [] }; groups.set(k, g); }
-    g.series.push({ x: new Date(r.observed_at).getTime(), y: r.used_fraction });
+// Per-mark tooltips: elements with data-i get hover + focus.
+function bindMarks(el, tipFor) {
+  const svg = el.querySelector('svg');
+  if (!svg) return;
+  const show = (t, x, y) => { const i = t && t.closest('[data-i]'); if (i) showTip(tipFor(+i.dataset.i), x, y); };
+  svg.addEventListener('pointermove', e => { const t = e.target.closest('[data-i]'); if (t) show(t, e.clientX, e.clientY); else hideTip(); });
+  svg.addEventListener('pointerleave', hideTip);
+  svg.addEventListener('focusin', e => { const r = e.target.getBoundingClientRect(); show(e.target, r.left + r.width / 2, r.top); });
+  svg.addEventListener('focusout', hideTip);
+}
+function table(head, rows) {
+  if (!rows.length) return '<div class="empty">No data.</div>';
+  return `<table><thead><tr>${head.map(h => `<th${h.n ? ' class="n"' : ''}>${esc(h.t || h)}</th>`).join('')}</tr></thead><tbody>` +
+    rows.map(r => `<tr>${r.map((c, i) => `<td${head[i].n ? ' class="n"' : ''}>${c}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
+}
+
+// ==== panel 1: account cards ====
+function renderCards() {
+  const el = $('#cards');
+  if (!S.summary.length) { el.innerHTML = '<div class="acct empty">No accounts yet. They appear after the first request flows through CPA.</div>'; return; }
+  el.innerHTML = S.summary.map(s => cardHTML(vmCard(s))).join('');
+}
+function cardHTML(v) {
+  const a = v.a, m = v.meter;
+  const top = `<div class="top">${acctDot(a)}<span class="who">${esc(a.provider)}</span><span class="muted">${esc(a.email || a.auth_id)}</span>
+    ${a.plan_type ? `<span class="badge">${esc(a.plan_type)}</span>` : ''}
+    <span class="badge" title="coverage mode">${esc(v.mode.replace('_', ' '))}</span></div>`;
+  if (!m || !m.cycle) return `<div class="acct">${top}<div class="empty">${m ? 'No cycle yet for the weekly meter. ' + esc(collectingText(m.collecting)) : 'No meter readings yet.'}</div></div>`;
+  let hero;
+  if (v.reason) {
+    hero = `<div class="v">—</div><div class="note warn">Capacity figures disabled: ${esc(v.reason)}.</div>`;
+  } else if (v.insufficient) {
+    hero = `<div class="v" style="font-size:20px">Collecting…</div><div class="ci">${esc(collectingText(m.collecting || (v.est && v.est.collecting)))}</div>`;
+  } else {
+    hero = `<div class="v">${fmtUSD(v.vhat)} <small>per 100% of the ${esc(fmtMeter(m.meter))} meter</small></div>
+      <div class="ci">95% CI ${fmtRange(v.est.ci_lo, v.est.ci_hi)} (${fmtPM(v.vhat, v.est.ci_lo, v.est.ci_hi)}) ${gradeBadge(v.est.grade)}
+      ${v.est.v_blend ? `<span class="muted" title="precision-weighted blend with the previous final">· blended ${fmtUSD(v.est.v_blend)}</span>` : ''}</div>`;
   }
-  for (const g of groups.values()) g.series.reverse();
-  return [...groups.values()].sort((a, b) => a.meter.localeCompare(b.meter) || a.source.localeCompare(b.source));
-}
-function renderMeters(perAccount) {
-  const html = perAccount.map(({ account, readings }) => {
-    const groups = groupReadings(readings);
-    const body = groups.length ? `<div class="meters">${groups.map(g => {
-      const r = g.latest, over = r.used_fraction >= 1;
-      return `<div class="meter">
-        <div class="row"><strong>${esc(g.meter)}</strong><span class="badge">${esc(g.source)}</span></div>
-        <div class="row"><span class="pct ${over ? 'bad' : ''}">${esc(fmtPct(r.used_fraction))}</span><span class="muted">raw ${esc(r.raw)} · ${g.series.length} pts</span></div>
-        ${SVG.line(g.series, { yMin: 0, yMax: Math.max(1, ...g.series.map(p => p.y)), guides: [0.5, 1], fill: 'var(--accent)', label: g.meter + ' used fraction' })}
-        <div class="foot"><span>${esc(fmtAgo(r.observed_at))}</span><span>resets ${esc(fmtTime(r.reset_at))}${r.status ? ' · ' + esc(r.status) : ''}</span></div>
-      </div>`;
-    }).join('')}</div>` : '<div class="empty">No readings yet.</div>';
-    return `<div class="panel"><h3>${providerBadge(account.provider)} <span class="mono">${esc(account.auth_index)}</span> <span class="muted">${esc(account.email || account.auth_id)}</span></h3>${body}</div>`;
+  if (v.reason && v.est) hero += `<div class="ci">${gradeBadge(v.est.grade)}</div>`;
+  const f = v.f, cyc = v.cyc;
+  const used = v.open ? `<div class="val">${fmtPct(v.used)}</div>
+      <div class="meterbar" title="used vs. elapsed share of the window"><i style="width:${Math.min(100, (v.used || 0) * 100)}%;background:${colorOf(a.auth_index)}"></i>${v.pTime != null ? `<b style="left:calc(${Math.min(100, v.pTime * 100)}% - 1px)"></b>` : ''}</div>
+      <div class="s">${v.pTime != null ? fmtPct(v.pTime) + ' of the week elapsed' : ''}</div>`
+    : `<div class="val">—</div><div class="s">cycle ended (${esc(cyc.end_reason || 'closed')}) ${esc(fmtTime(cyc.closed_at))}; waiting for the next reading</div>`;
+  let pace = '<div class="val">—</div>';
+  if (f) {
+    const ex = f.t_exhaust && ms(f.t_exhaust) < ms(cyc.reset_at);
+    pace = `<div class="val">${statusBadge(f.status)}</div><div class="s">${ex ? 'exhausts ' + esc(fmtTime(f.t_exhaust)) + ' (' + fmtIn(f.t_exhaust) + ')' : 'resets ' + fmtIn(cyc.reset_at) + ' · ends ≈' + fmtPct(f.u_end) + ' used'}</div>`;
+  }
+  const rem = f && f.remaining_usd != null ? `<div class="val">${fmtUSD(f.remaining_usd)}</div><div class="s">${fmtRange(f.remaining_lo, f.remaining_hi)}${f.usd_per_day != null ? ' · ' + fmtUSD(f.usd_per_day) + '/day pace' : ''}</div>` : `<div class="val">—</div><div class="s">${v.reason ? 'capacity disabled' : v.open ? 'needs a V̂' : ''}</div>`;
+  const unexpl = v.est ? `<div class="val">${fmtPct(v.est.unexplained_frac)}</div><div class="s">of ticks proxied $ cannot explain${v.est.coverage_gap_usd ? ' · gap ≈' + fmtUSD(v.est.coverage_gap_usd) : ''}</div>` : '<div class="val">—</div>';
+  const stat = (k, body) => `<div class="stat"><div class="k">${esc(k)}</div>${body}</div>`;
+  const others = v.others.map(o => {
+    const e = o.latest_estimate, open = o.cycle && o.cycle.open;
+    const val = !o.cycle ? esc(collectingText(o.collecting)) : `${open ? fmtPct(o.used_fraction) + ' used' : 'idle since reset ' + esc(fmtAgo(o.cycle.closed_at))}${e && e.v_hat ? ' · V̂ ' + fmtUSD(e.v_hat) : e && e.grade === 'insufficient' ? ' · ' + esc(collectingText(e.collecting)) : ''}`;
+    return `<span><strong>${esc(fmtMeter(o.meter))}</strong>: ${val}</span>`;
   }).join('');
-  $('#meters').innerHTML = html || '<div class="panel empty">No accounts yet.</div>';
-}
-function renderEvents(events, accountsById) {
-  if (!events.length) { $('#events').innerHTML = '<div class="empty">No events yet.</div>'; return; }
-  $('#events').innerHTML = `<table><thead><tr><th>Observed</th><th>Account</th><th>Model</th><th>Tier</th><th class="n">Input</th><th class="n">Cache rd</th><th class="n">Cache wr</th><th class="n">Output</th><th class="n">API $</th><th>Status</th></tr></thead><tbody>` +
-    events.map(e => {
-      const a = accountsById.get(e.account_id);
-      return `<tr>
-        <td>${esc(fmtTime(e.observed_at))}</td>
-        <td>${a ? providerBadge(a.provider) : ''} <span class="mono">${esc(e.auth_index)}</span></td>
-        <td class="mono">${esc(e.model)}${e.alias && e.alias !== e.model ? ` <span class="muted">(${esc(e.alias)})</span>` : ''}</td>
-        <td>${esc(e.service_tier || '')}${e.is_fast ? ' fast' : ''}${e.is_long ? ' long' : ''}</td>
-        <td class="n">${fmtInt(e.uncached_input)}</td><td class="n">${fmtInt(e.cache_read)}</td><td class="n">${fmtInt(e.cache_write)}</td><td class="n">${fmtInt(e.output)}</td>
-        <td class="n">${esc(fmtUSD(e.api_usd))}</td>
-        <td class="${e.failed ? 'bad' : ''}">${e.failed ? 'failed ' + esc(e.status_code || '') : 'ok'}${e.flags ? ` <span class="muted">flags ${e.flags}</span>` : ''}</td>
-      </tr>`;
-    }).join('') + '</tbody></table>';
+  return `<div class="acct">${top}<div class="hero">${hero}</div>
+    <div class="stats">
+      ${stat('Weekly used', used)}
+      ${stat('$ spent this cycle', `<div class="val">${fmtUSD(m.spent_usd)}</div><div class="s">${fmtInt(m.events)} proxied requests at API prices</div>`)}
+      ${stat('$ remaining', rem)}
+      ${stat('Projection', pace)}
+      ${stat('Unexplained share', unexpl)}
+    </div>
+    ${v.est && v.est.flags.length ? `<div style="margin-top:6px">${flagChips(v.est.flags)}</div>` : ''}
+    ${others ? `<div class="secondary">${others}</div>` : ''}</div>`;
 }
 
-// ---- refresh loop ----
-let key = readKey();
-let inflight = false;
+// ==== panel 2: week over week ====
+function renderWow() {
+  const el = $('#wow'), series = vmWow();
+  $('#wowLegend').innerHTML = series.map(s => `<span><i class="dot" style="background:${s.color}"></i>${esc(acctLabel(s.a))}</span>`).join('') +
+    Object.values(FLAG_GLYPHS).map(g => `<span title="${esc(g[1])}">${esc(g[0])} ${esc(g[1].split(':')[0].toLowerCase())}</span>`).join('');
+  const all = series.flatMap(s => s.pts.map(p => ({ ...p, s })));
+  if (!all.length) { el.innerHTML = '<div class="empty">No graded cycles yet. The first point appears once a weekly cycle has at least 5 ticks and 3 crossings.</div>'; $('#wowTable').innerHTML = ''; return; }
+  const w = widthOf(el), h = 260, m = { l: 56, r: 16, t: 24, b: 28 };
+  let x0 = Math.min(...all.map(p => p.x)), x1 = Math.max(...all.map(p => p.x));
+  const padX = Math.max(3.5 * 864e5, (x1 - x0) * 0.04); x0 -= padX; x1 += padX;
+  const yMax = SVG.niceMax(Math.max(...all.map(p => p.hi || p.v)) * 1.05);
+  const sx = SVG.lin(x0, x1, m.l, w - m.r), sy = SVG.lin(0, yMax, h - m.b, m.t);
+  const tt = SVG.timeTicks(x0, x1, Math.max(4, Math.floor(w / 90)));
+  let g = SVG.gridY(sy, SVG.ticks(0, yMax, 5), m.l, w - m.r, fmtUSDAxis) + SVG.axisX(sx, tt.ticks, h - m.b, tt.fmt, m.l, w - m.r);
+  const n = series.length;
+  all.forEach((p, i) => {
+    const si = series.indexOf(p.s), dx = n > 1 ? (si - (n - 1) / 2) * 8 : 0;
+    const x = sx(p.x) + dx, yv = sy(p.v), ylo = sy(p.lo || p.v), yhi = sy(p.hi || p.v);
+    g += `<rect class="hit" data-i="${i}" tabindex="0" x="${x - 12}" y="${yhi - 8}" width="24" height="${ylo - yhi + 16}" aria-label="${esc(acctLabel(p.s.a))} ${fmtDay(p.x)} ${fmtUSD(p.v)}"/>`;
+    g += `<g class="mk" pointer-events="none"><line x1="${x}" x2="${x}" y1="${yhi}" y2="${ylo}" stroke="${p.s.color}" stroke-width="2" stroke-linecap="round"/>`;
+    g += `<line x1="${x - 4}" x2="${x + 4}" y1="${yhi}" y2="${yhi}" stroke="${p.s.color}" stroke-width="2"/><line x1="${x - 4}" x2="${x + 4}" y1="${ylo}" y2="${ylo}" stroke="${p.s.color}" stroke-width="2"/>`;
+    g += `<circle cx="${x}" cy="${yv}" r="${p.open ? 4 : 5}" fill="${p.open ? 'var(--card)' : p.s.color}" stroke="${p.open ? p.s.color : 'var(--card)'}" stroke-width="2"/></g>`;
+    if (p.glyphs.length) g += `<text class="glyph" x="${x}" y="${yhi - 6}" text-anchor="middle" pointer-events="none">${esc(p.glyphs.map(k => FLAG_GLYPHS[k][0]).join(''))}</text>`;
+  });
+  el.innerHTML = `<svg width="${w}" height="${h}" role="img" aria-label="V̂ per cycle">${g}</svg>`;
+  bindMarks(el, i => {
+    const p = all[i], c = p.c, e = c.estimate;
+    return `<div class="row"><i class="dot" style="background:${p.s.color}"></i>${esc(acctLabel(p.s.a))}</div>` +
+      tipRow(fmtUSD(p.v), p.open ? 'running V̂' : 'final V̂') + tipRow(fmtRange(p.lo, p.hi), '95% CI') +
+      tipRow(fmtDay(c.starts_at) + ' → ' + fmtDay(c.closed_at || c.reset_at), c.end_reason || 'open') +
+      tipRow(e.grade, 'grade') + tipRow(fmtUSD(c.spent_usd), 'proxied $') +
+      (c.flags.length ? `<div class="lbl" style="margin-top:4px">${esc(c.flags.map(f => FLAG_GLYPHS[f] ? FLAG_GLYPHS[f][0] + ' ' + f : f + (INFO_FLAGS[f] ? ' (info)' : '')).join(', '))}</div>` : '') +
+      (c.low_coverage ? '<div class="lbl">◌ low coverage</div>' : '');
+  });
+  $('#wowTable').innerHTML = table(['Account', 'Cycle', 'Kind', { t: 'V̂', n: 1 }, { t: '95% CI', n: 1 }, 'Grade', { t: 'Proxied $', n: 1 }, 'Flags'],
+    all.slice().sort((a, b) => b.x - a.x).map(p => [esc(acctLabel(p.s.a)), esc(fmtDay(p.c.starts_at) + ' → ' + fmtDay(p.c.closed_at || p.c.reset_at)),
+      p.open ? 'running' : 'final', fmtUSD(p.v), fmtRange(p.lo, p.hi), esc(p.grade), fmtUSD(p.c.spent_usd), flagChips(p.c.flags)]));
+}
+
+// ==== panel 3: current-cycle pace (two stacked plots sharing time) ====
+function renderPace() {
+  const el = $('#pace'), v = vmPace();
+  const a = accounts().find(x => x.auth_index === S.sel.auth);
+  if (!v) { el.innerHTML = `<div class="empty">No ${esc(fmtMeter(S.sel.meter))} cycle yet for this account.</div>`; $('#paceSub').textContent = ''; $('#paceLegend').innerHTML = ''; $('#paceTable').innerHTML = ''; return; }
+  $('#paceSub').textContent = `${a ? acctLabel(a) : ''} · ${fmtMeter(v.c.meter)} cycle ${fmtTime(v.c.starts_at)} → ${fmtTime(v.c.reset_at)}` +
+    (v.f ? ` · recent pace ${fmtPct(v.f.burn_per_hour * 24)}/day over ${v.f.pace_window_h.toFixed(0)} h` : v.c.open ? '' : ' · closed');
+  const key = (c, cls, label) => `<span><i class="key ${cls}" style="border-color:${c}"></i>${esc(label)}</span>`;
+  $('#paceLegend').innerHTML = key(v.color, '', 'used % (headers)') + (v.poll.length ? key('var(--neutral)', '', 'used % (polls)') : '') +
+    key('var(--fg2)', 'dot3', 'sustainable (linear to reset)') + (v.proj.length ? key(v.color, 'dash', 'projection: recent pace') + key('var(--muted)', 'dash', 'projection: cycle-average pace') : '') +
+    key('var(--s3)', '', 'cumulative API $ (lower plot)');
+  const w = widthOf(el), h1 = 190, h2 = 110, gap = 30, m = { l: 56, r: 16, t: 10, b: 26 };
+  const H = m.t + h1 + gap + h2 + m.b;
+  const sx = SVG.lin(v.t0, v.t1, m.l, w - m.r);
+  const uMax = Math.max(1, ...v.header.map(p => p[1]), ...v.poll.map(p => p[1]));
+  const sy = SVG.lin(0, uMax, m.t + h1, m.t);
+  const cumMax = SVG.niceMax(Math.max(1, ...v.cum.map(p => p[1])), 3);
+  const top2 = m.t + h1 + gap, sy2 = SVG.lin(0, cumMax, top2 + h2, top2);
+  const tt = SVG.timeTicks(v.t0, v.t1, Math.max(4, Math.floor(w / 90)));
+  let g = SVG.gridY(sy, SVG.ticks(0, uMax, 4), m.l, w - m.r, x => Math.round(x * 100) + '%');
+  g += `<line class="base" x1="${m.l}" x2="${w - m.r}" y1="${m.t + h1}" y2="${m.t + h1}"/>`;
+  g += SVG.gridY(sy2, SVG.ticks(0, cumMax, 3), m.l, w - m.r, fmtUSDAxis) + SVG.axisX(sx, tt.ticks, top2 + h2, tt.fmt, m.l, w - m.r);
+  g += `<text class="ax" x="${m.l}" y="${top2 - 8}">cumulative API $ at list prices</text>`;
+  g += `<path d="M${sx(v.t0)} ${sy(0)}L${sx(v.t1)} ${sy(1)}" stroke="var(--fg2)" stroke-width="1.5" stroke-dasharray="1 4" stroke-linecap="round" fill="none"/>`;
+  const step = pts => pts.map((p, i) => (i ? 'H' + sx(p[0]).toFixed(1) + 'V' : 'M' + sx(p[0]).toFixed(1) + ' ') + sy(p[1]).toFixed(1)).join('');
+  if (v.poll.length) g += `<path d="${step(v.poll)}" stroke="var(--neutral)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>`;
+  if (v.header.length) g += `<path d="${step(v.header)}" stroke="${v.color}" stroke-width="2" fill="none" stroke-linejoin="round"/>`;
+  for (const p of v.proj) g += `<path d="${SVG.path(p.pts, sx, sy)}" stroke="${p.kind === 'recent' ? v.color : 'var(--muted)'}" stroke-width="2" stroke-dasharray="5 4" fill="none"/>`;
+  if (v.now) g += `<line x1="${sx(v.now)}" x2="${sx(v.now)}" y1="${m.t}" y2="${top2 + h2}" class="base"/><text class="ax" x="${sx(v.now) + 4}" y="${m.t + 10}">now</text>`;
+  if (v.cum.length) {
+    const d2 = v.cum.map((p, i) => (i ? 'L' : 'M') + sx(p[0]).toFixed(1) + ' ' + sy2(p[1]).toFixed(1)).join('');
+    g += `<path d="${d2}L${sx(v.cum[v.cum.length - 1][0]).toFixed(1)} ${sy2(0)}L${sx(v.cum[0][0]).toFixed(1)} ${sy2(0)}Z" fill="var(--s3)" opacity=".1"/><path d="${d2}" stroke="var(--s3)" stroke-width="2" fill="none"/>`;
+  }
+  g += `<line class="xh" style="display:none"/>`;
+  el.innerHTML = `<svg width="${w}" height="${H}" role="img" aria-label="used percent and cumulative dollars over the cycle">${g}</svg>`;
+  const xs = [...new Set([...v.header, ...v.poll, ...v.cum].map(p => p[0]))].sort((x, y) => x - y);
+  bindCrosshair(el, xs, sx, m.t, top2 + h2, i => {
+    const t = xs[i], u = valueAt(v.header, t), pu = valueAt(v.poll, t), c = valueAt(v.cum, t);
+    const lin = (t - v.t0) / (v.t1 - v.t0);
+    return `<div class="lbl">${esc(fmtTime(t))}</div>` + (u != null ? tipRow(fmtPct(u), 'used (header)', v.color) : '') +
+      (pu != null ? tipRow(fmtPct(pu), 'used (poll)', v.color) : '') + tipRow(fmtPct(lin), 'sustainable', 'var(--fg2)') +
+      (c != null ? tipRow(fmtUSD(c), 'API $ so far', 'var(--s3)') : '');
+  });
+  const every = Math.max(1, Math.ceil(xs.length / 60));
+  $('#paceTable').innerHTML = table(['Time', { t: 'Used (header)', n: 1 }, { t: 'Used (poll)', n: 1 }, { t: 'API $ so far', n: 1 }],
+    xs.filter((_, i) => i % every === 0 || i === xs.length - 1).map(t => [esc(fmtTime(t)), fmtPct(valueAt(v.header, t)), fmtPct(valueAt(v.poll, t)), fmtUSD(valueAt(v.cum, t))]));
+}
+
+// ==== panel 4: $ vs % ====
+function renderDollar() {
+  const el = $('#dvp'), v = vmDollar();
+  if (!v || v.pts.length < 2) {
+    $('#dvpSub').textContent = ''; $('#dvpLegend').innerHTML = ''; $('#dvpTable').innerHTML = '';
+    el.innerHTML = `<div class="empty">No crossings yet in this cycle. Points appear as the meter crosses whole-tick levels.</div>`; return;
+  }
+  const s = summaryOf(S.sel.auth), capOff = s && s.capacity_disabled_reason;
+  $('#dvpSub').textContent = `Cumulative proxied $ (lag ${v.lag}) against meter level at each crossing.` +
+    (v.fit ? ` Fitted slope ${fmtUSD(v.fit.usd_per_pct)} per 1% (V̂ ${fmtUSD(v.fit.v_hat)} per 100%).` : '') + (capOff ? ' Coverage is not cpa_only, so the slope is a floor.' : '');
+  $('#dvpLegend').innerHTML = `<span><i class="dot" style="background:${v.color}"></i>crossing used for V̂</span><span><i class="dot" style="background:var(--card);border:2px solid var(--muted)"></i>excluded crossing</span>` +
+    (v.fit ? `<span><i class="key" style="border-color:var(--fg2)"></i>fitted slope V̂/100</span>` : '');
+  const w = widthOf(el), h = 290, m = { l: 56, r: 16, t: 12, b: 30 };
+  const u0 = v.pts[0].u, u1 = Math.max(...v.pts.map(p => p.u));
+  const yMax = SVG.niceMax(Math.max(...v.pts.map(p => p.usd), v.fit ? v.fit.usd_per_pct * (u1 - u0) * 100 : 0) * 1.03, 4);
+  const sx = SVG.lin(u0, u1, m.l, w - m.r), sy = SVG.lin(0, yMax, h - m.b, m.t);
+  const xt = SVG.ticks(u0, u1, Math.max(3, Math.floor(w / 80)));
+  let g = SVG.gridY(sy, SVG.ticks(0, yMax, 4), m.l, w - m.r, fmtUSDAxis) + SVG.axisX(sx, xt, h - m.b, x => Math.round(x * 100) + '%', m.l, w - m.r);
+  if (v.fit) g += `<path d="M${sx(u0)} ${sy(0)}L${sx(u1)} ${sy(v.fit.usd_per_pct * (u1 - u0) * 100)}" stroke="var(--fg2)" stroke-width="2" fill="none"/>`;
+  g += `<path d="${SVG.path(v.pts.map(p => [p.u, p.usd]), sx, sy)}" stroke="${v.color}" stroke-width="1" opacity=".5" fill="none"/>`;
+  g += v.pts.map(p => `<circle cx="${sx(p.u).toFixed(1)}" cy="${sy(p.usd).toFixed(1)}" r="4" fill="${p.used ? v.color : 'var(--card)'}" stroke="${p.used ? 'var(--card)' : 'var(--muted)'}" stroke-width="2"/>`).join('');
+  g += `<line class="xh" style="display:none"/>`;
+  el.innerHTML = `<svg width="${w}" height="${h}" role="img" aria-label="cumulative dollars against meter level">${g}</svg>`;
+  const xs = v.pts.map(p => p.u);
+  bindCrosshair(el, xs, sx, m.t, h - m.b, i => {
+    const p = v.pts[i];
+    if (p.base) return tipRow(fmtPct(p.u), 'baseline (first reading)') + `<div class="lbl">${esc(fmtTime(p.t))}</div>`;
+    return `<div class="lbl">${esc(fmtTime(p.t))}</div>` + tipRow(fmtPct(p.u), 'level') + tipRow(fmtUSD(p.usd), 'cumulative $', v.color) +
+      tipRow(fmtUSD(p.d), `this segment (${p.dt} tick${p.dt === 1 ? '' : 's'})`) +
+      (v.fit ? tipRow(fmtUSD(v.fit.usd_per_pct * (p.u - u0) * 100), 'on the fitted line', 'var(--fg2)') : '') +
+      (p.used ? '' : `<div class="lbl">excluded: ${esc(p.flags.join(', '))}</div>`);
+  });
+  $('#dvpTable').innerHTML = table(['Time', { t: 'Level', n: 1 }, { t: 'Δ ticks', n: 1 }, { t: 'Segment $', n: 1 }, { t: 'Cumulative $', n: 1 }, 'Used', 'Flags'],
+    v.pts.slice(1).map(p => [esc(fmtTime(p.t)), fmtPct(p.u), p.dt, fmtUSD(p.d), fmtUSD(p.usd), p.used ? 'yes' : 'no', flagChips(p.flags)]));
+}
+
+// ==== panel 5: weights ====
+function forest(f, lo, hi) { // CI bar on a log scale 0.25×..4× around 1.0
+  const w = 120, h = 16, sx = SVG.lin(Math.log(0.25), Math.log(4), 4, w - 4), c = x => sx(Math.log(Math.min(4, Math.max(0.25, x)))).toFixed(1);
+  return `<svg width="${w}" height="${h}" aria-hidden="true"><line x1="${c(1)}" x2="${c(1)}" y1="1" y2="${h - 1}" class="base" stroke="var(--axis)"/>` +
+    (lo && hi ? `<line x1="${c(lo)}" x2="${c(hi)}" y1="8" y2="8" stroke="var(--fg2)" stroke-width="2" stroke-linecap="round"/>` : '') +
+    `<circle cx="${c(f)}" cy="8" r="4" fill="${colorOf(S.sel.auth)}" stroke="var(--card)" stroke-width="2"/></svg>`;
+}
+function renderWeights() {
+  const el = $('#weights'), w = S.weights, a = accounts().find(x => x.auth_index === S.sel.auth);
+  if (!w) {
+    $('#wSub').textContent = a ? `${acctLabel(a)} · ${fmtMeter(S.sel.meter)} meter` : '';
+    el.innerHTML = '<div class="empty">No weight fit yet for this meter. The learner needs at least 5 eligible segments; until then every model is assumed to count at its API price (factor 1.00×).</div>';
+    return;
+  }
+  const statusLbl = s => ({ identified: badge('good', '', 'identified'), prior_locked: badge('neutral', '', 'prior-locked'), anchor: badge('neutral', '', 'anchor') }[s] || esc(s));
+  $('#wSub').innerHTML = `${esc(a ? acctLabel(a) : '')} · fitted ${esc(fmtAgo(w.computed_at))} · anchor <span class="mono">${esc(w.anchor)}</span> · lag ${esc(w.lag)} · ${fmtInt(w.eligible)} of ${fmtInt(w.segments)} segments eligible` +
+    (w.identified_any ? '' : ' · <strong>nothing identified yet: values assume API-price weighting</strong>');
+  const rows = w.factors.map(f => [`<span class="mono">${esc(f.kind === 'model' ? f.name : f.kind === 'type' ? 'type: ' + f.name : f.name)}</span>`,
+    fmtX(f.estimate), f.status === 'anchor' ? '<span class="muted">fixed</span>' : fmtX(f.ci_lo) + '–' + fmtX(f.ci_hi), forest(f.estimate, f.ci_lo, f.ci_hi),
+    statusLbl(f.status), fmtInt(f.segments), fmtPct(f.data_share)]);
+  const models = w.models.map(m => [`<span class="mono">${esc(m.family)}</span>`, fmtX(m.factor), fmtUSD(m.value_per_100), fmtRange(m.ci_lo, m.ci_hi), statusLbl(m.status)]);
+  el.innerHTML = `<div class="scroll">${table(['Factor', { t: 'Counts at × API price', n: 1 }, { t: '95% CI', n: 1 }, '0.25× · 1× · 4×', 'Status', { t: 'Segments', n: 1 }, { t: 'Data share', n: 1 }], rows)}</div>
+    <h3 style="margin-top:14px">Implied $ per 100% if you used only one model</h3>
+    <p class="sub">V<sub>m</sub> = latest cycle scale ÷ model factor, in API $ at that model's own prices.${w.identified_any ? '' : ' Assumes API-price weighting.'}</p>
+    <div class="scroll">${table(['Model', { t: 'Factor', n: 1 }, { t: '$ per 100%', n: 1 }, { t: '95% CI', n: 1 }, 'Status'], models)}</div>`;
+}
+
+// ==== panel 6: mix ====
+function renderMix() {
+  const v = vmMix(), el = $('#mix');
+  $('#mixLegend').innerHTML = `<span><i class="key" style="border-color:${v.color};border-top-width:8px"></i>this cycle</span>` +
+    (v.last ? `<span><i class="key" style="border-color:var(--neutral);border-top-width:8px"></i>last cycle</span>` : '');
+  $('#mixSub').textContent = `Share of API $ by model family and by token type, ${fmtMeter(S.sel.meter)} meter` +
+    (v.cur ? (v.cur.source === 'events' ? ' (this cycle: all proxied $)' : ' (segments used for V̂)') : '') + '.';
+  if (!v.cur && !v.last) { el.innerHTML = '<div class="empty">No spend recorded yet.</div>'; return; }
+  const bar = (share, color) => share == null ? '' : `<div class="mixbar"><i style="width:${(share * 100 * 0.8).toFixed(1)}%;background:${color}"></i><span>${fmtPct(share)}</span></div>`;
+  el.innerHTML = v.dims.map(d => `<div><h3>${d.dim === 'by_family' ? 'By model family' : 'By token type'}</h3>` +
+    (d.rows.length ? d.rows.map(r => `<div class="mixrow"><span class="mono" title="${esc(r.k)}">${esc(r.k.replace(/_/g, ' '))}</span><div class="bars">${bar(r.cur, v.color)}${bar(r.last, 'var(--neutral)')}</div></div>`).join('') : '<div class="empty">—</div>') + '</div>').join('');
+}
+
+// ==== panel 7: settings ====
+function renderSettings() {
+  const st = S.settings, h = S.health || {}, cfg = h.config || {}, pr = h.prices;
+  if (!st) return;
+  const d = st.display || {};
+  const cov = st.accounts.map(a => `<div class="row">${acctDot(a)}<span>${esc(a.provider)} <span class="muted">${esc(a.email || a.auth_index)}</span></span>
+    <select data-cov="${esc(a.auth_index)}" aria-label="coverage mode">${st.coverage_modes.map(m => `<option value="${m}"${m === a.coverage_mode ? ' selected' : ''}>${m.replace('_', ' ')}</option>`).join('')}</select></div>`).join('');
+  const exp = accounts().map(a => {
+    const s = summaryOf(a.auth_index), c = s && s.meters[0] && s.meters[0].cycle;
+    return `<div class="row">${acctDot(a)}<span style="min-width:52px">${esc(a.provider)}</span><button type="button" data-export="${esc(a.auth_index)}" data-cycle="${c ? c.cycle_id : ''}"${c ? '' : ' disabled'}>Export cycle CSV</button>
+      <button type="button" data-recompute="${esc(a.auth_index)}">Recompute</button></div>`;
+  }).join('');
+  $('#settings').innerHTML = `
+    <div><h3>Coverage mode</h3><p class="sub">cpa_only: every request of the account goes through CPA, so V̂ is the allowance. Otherwise capacity figures are hidden.</p>${cov || '<div class="empty">No accounts.</div>'}
+      <div class="row"><button type="button" class="primary" id="saveCov">Save coverage</button></div></div>
+    <div><h3>Jobs</h3>
+      <div class="row"><button type="button" data-job="poll">Poll now</button><button type="button" data-job="sync">Sync prices</button><button type="button" data-job="reprice">Reprice events</button></div>
+      ${exp}<div class="row muted" id="jobMsg">${esc(S.msg)}</div></div>
+    <div><h3>Display</h3>
+      <div class="row"><label>Cycles shown <input id="dCycles" type="number" min="2" max="104" value="${d.cycles_shown || 12}" style="width:70px"></label>
+      <label>Refresh (s) <input id="dRefresh" type="number" min="15" max="3600" value="${d.refresh_s || 60}" style="width:80px"></label></div>
+      <div class="row"><label>Default providers <select id="dWow">${['both', 'claude', 'codex'].map(x => `<option${x === d.wow_view ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
+      <button type="button" id="saveDisplay">Save display</button></div></div>
+    <div><h3>Plugin config <span class="muted" style="font-weight:400">(CPA config.yaml)</span></h3><dl class="kv">
+      <dt>Poll interval</dt><dd>${cfg.PollIntervalMinutes ? esc(cfg.PollIntervalMinutes) + ' min' : 'disabled'}</dd>
+      <dt>Cache-write multiplier</dt><dd>${esc(cfg.ClaudeCacheWriteMultiplier ?? '—')}×</dd>
+      <dt>Price sync</dt><dd>${cfg.PriceSyncHours ? 'every ' + esc(cfg.PriceSyncHours) + ' h' : 'disabled'}</dd>
+      <dt>Retention</dt><dd>${esc(cfg.RetentionDays ?? '—')} days</dd>
+      <dt>Price table</dt><dd>${pr ? `<span class="mono">${esc(pr.hash)}</span> · ${esc(pr.families)} families · ${esc(pr.source || '?')} · ${esc(fmtAgo(pr.synced_at))}` : '—'}</dd>
+    </dl></div>`;
+}
+async function runJob(label, fn) {
+  S.msg = label + '…'; $('#jobMsg').textContent = S.msg;
+  document.querySelectorAll('#settings button').forEach(b => { b.disabled = true; });
+  try { S.msg = label + ': ' + (await fn()); } catch (e) { S.msg = label + ' failed: ' + (e.message || e); }
+  await refresh();
+}
+async function downloadCSV(auth, cycle) {
+  const res = await request('/export' + qs({ auth_index: auth, cycle_id: cycle }));
+  if (!res.ok) throw new Error('export returned ' + res.status);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url; a.download = `subscription-value-${auth}-cycle${cycle}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return 'downloaded';
+}
+$('#settings').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.id === 'saveCov') {
+    const coverage = {};
+    document.querySelectorAll('[data-cov]').forEach(s => { coverage[s.dataset.cov] = s.value; });
+    runJob('Save coverage', async () => { await apiPost('/settings', { coverage }); return 'saved'; });
+  } else if (b.id === 'saveDisplay') {
+    const display = { cycles_shown: +$('#dCycles').value, refresh_s: +$('#dRefresh').value, wow_view: $('#dWow').value };
+    runJob('Save display', async () => { await apiPost('/settings', { display }); S.wowView = display.wow_view; schedule(display.refresh_s); return 'saved'; });
+  } else if (b.dataset.job === 'poll') {
+    runJob('Poll', async () => { const r = await apiPost('/poll'); const x = r.result || {}; return x.polled != null ? `${x.polled} polled, ${x.ok} ok, ${x.readings ?? 0} readings` : 'done'; });
+  } else if (b.dataset.job === 'sync') {
+    runJob('Price sync', async () => { const r = await apiPost('/prices/sync'); return r.changed ? 'prices changed (' + r.hash + '); reprice to apply' : 'no change'; });
+  } else if (b.dataset.job === 'reprice') {
+    runJob('Reprice', async () => { const r = await apiPost('/prices/reprice'); return fmtInt(r.updated) + ' events repriced'; });
+  } else if (b.dataset.recompute) {
+    runJob('Recompute', async () => { await apiPost('/recompute' + qs({ auth_index: b.dataset.recompute })); return 'done'; });
+  } else if (b.dataset.export) {
+    runJob('Export', () => downloadCSV(b.dataset.export, b.dataset.cycle));
+  }
+});
+
+// ==== diagnostics ====
+function renderDiag() {
+  const h = S.health;
+  if (!h) return;
+  const st = h.store || {}, ing = h.ingest || {};
+  const polls = (h.polls || []).map(p => `<dt>Poll ${esc(p.auth_index)}</dt><dd>${p.status ? `${p.status.ok ? 'ok' : '<span class="bad">' + esc(p.status.error || 'failed') + '</span>'} · ${esc(fmtAgo(p.status.at))} · next ${esc(fmtIn(p.status.next_at))}` : 'never'}</dd>`).join('');
+  const rc = ((h.estimator || {}).recomputes || []).map(r => `<dt>Recompute ${esc(r.auth_index)} ${esc(r.meter)}</dt><dd>${esc(fmtAgo(r.last_recompute_at))}</dd>`).join('');
+  $('#health').innerHTML = `<dt>Plugin</dt><dd>${esc(h.plugin_version || '?')} · schema v${esc(h.schema_version ?? '?')} · up ${esc(fmtDur(h.uptime_s || 0))}</dd>
+    <dt>Store</dt><dd>${fmtInt(st.events)} events · ${fmtInt(st.readings)} readings · ${esc(fmtBytes(st.db_bytes))}</dd>
+    <dt>Ingest</dt><dd><span class="${ing.dropped ? 'bad' : ''}">${fmtInt(ing.dropped)} dropped</span> · ${fmtInt(ing.queued)} queued · last event ${esc(fmtAgo(ing.last_event_at))}</dd>${polls}${rc}`;
+  const byId = new Map(accounts().map(a => [a.id, a]));
+  $('#events').innerHTML = !S.events.length ? '<div class="empty">Open this section to load recent events.</div>' :
+    table(['Observed', 'Account', 'Model', { t: 'Input', n: 1 }, { t: 'Cache rd', n: 1 }, { t: 'Cache wr', n: 1 }, { t: 'Output', n: 1 }, { t: 'API $', n: 1 }, 'Status'],
+      S.events.map(e => { const a = byId.get(e.account_id); return [esc(fmtTime(e.observed_at)), a ? acctDot(a) + ' ' + esc(a.provider) : esc(e.auth_index), `<span class="mono">${esc(e.model)}</span>`,
+        fmtInt(e.uncached_input), fmtInt(e.cache_read), fmtInt(e.cache_write), fmtInt(e.output), fmtUSD(e.api_usd), e.failed ? `<span class="bad">failed ${esc(e.status_code || '')}</span>` : 'ok']; }));
+}
+
+// ==== filters ====
+function renderFilters() {
+  const accts = accounts();
+  $('#selAccount').innerHTML = accts.map(a => `<option value="${esc(a.auth_index)}"${a.auth_index === S.sel.auth ? ' selected' : ''}>${esc(acctLabel(a))}</option>`).join('');
+  $('#selMeter').innerHTML = selMeters().map(m => `<option value="${esc(m)}"${m === S.sel.meter ? ' selected' : ''}>${esc(m)} · ${esc(fmtMeter(m))}</option>`).join('');
+  const views = ['both', ...new Set(accts.map(a => a.provider))];
+  $('#wowSeg').innerHTML = views.map(x => `<button type="button" data-view="${esc(x)}" aria-pressed="${x === S.wowView}">${esc(x)}</button>`).join('');
+}
+$('#selAccount').addEventListener('change', e => { S.sel.auth = e.target.value; S.sel.meter = '7d'; saveSel(); refresh(); });
+$('#selMeter').addEventListener('change', e => { S.sel.meter = e.target.value; saveSel(); refresh(); });
+$('#wowSeg').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) { S.wowView = b.dataset.view; renderFilters(); renderWow(); } });
+$('#diag').addEventListener('toggle', () => { if ($('#diag').open) refresh(); });
+
+// ==== render all + refresh loop ====
+function renderAll() {
+  const parts = [renderCards, renderFilters, renderWow, renderPace, renderDollar, renderWeights, renderMix, renderSettings, renderDiag];
+  for (const p of parts) { try { p(); } catch (e) { console.error(p.name, e); } }
+}
+let inflight = false, timer = null;
 function setStatus(msg, err) { const el = $('#status'); el.textContent = msg; el.classList.toggle('err', !!err); }
 async function refresh() {
   if (inflight) return;
   if (!key) { $('#auth').hidden = false; setStatus('management key required', true); return; }
-  inflight = true;
+  inflight = true; document.body.classList.add('loading');
   try {
-    const [health, acc] = await Promise.all([api('/health', key), api('/accounts', key)]);
+    applyTheme();
+    await load();
     $('#auth').hidden = true;
-    renderHealth(health);
-    const accounts = acc.accounts || [];
-    renderAccounts(accounts);
-    const accountsById = new Map(accounts.map(a => [a.id, a]));
-    const [events, ...readings] = await Promise.all([
-      api('/events?limit=' + EVENT_LIMIT + '&order=desc', key),
-      ...accounts.map(a => api('/readings?auth_index=' + encodeURIComponent(a.auth_index) + '&limit=' + READING_LIMIT + '&order=desc', key)),
-    ]);
-    renderMeters(accounts.map((account, i) => ({ account, readings: readings[i].readings || [] })));
-    renderEvents(events.events || [], accountsById);
-    setStatus('updated ' + new Date().toLocaleTimeString() + (health.ok ? '' : ' · store unavailable'), !health.ok);
+    renderAll();
+    setStatus('updated ' + new Date().toLocaleTimeString() + (S.health.ok ? '' : ' · store unavailable'), !S.health.ok);
   } catch (e) {
     if (e instanceof AuthError) { dropKey(); key = ''; $('#auth').hidden = false; }
     setStatus(e.message || String(e), true);
   } finally {
-    inflight = false;
+    inflight = false; document.body.classList.remove('loading');
   }
+}
+function schedule(sec) {
+  clearInterval(timer);
+  timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, Math.max(15, sec || 60) * 1000);
 }
 $('#keyForm').addEventListener('submit', ev => {
   ev.preventDefault();
@@ -316,9 +916,16 @@ $('#keyForm').addEventListener('submit', ev => {
   key = k; saveKey(k); $('#keyInput').value = '';
   refresh();
 });
+$('#refreshBtn').addEventListener('click', () => refresh());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
-setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, REFRESH_MS);
-refresh();
+let resizeT = null, lastW = innerWidth;
+addEventListener('resize', () => {
+  if (innerWidth === lastW) return;
+  lastW = innerWidth; clearTimeout(resizeT);
+  resizeT = setTimeout(() => { if (S.health) [renderWow, renderPace, renderDollar].forEach(f => f()); }, 150);
+});
+if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.health) renderAll(); });
+refresh().then(() => schedule(S.settings && S.settings.display && S.settings.display.refresh_s));
 </script>
 </body>
 </html>

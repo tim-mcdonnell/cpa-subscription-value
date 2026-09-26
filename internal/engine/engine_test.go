@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tim-mcdonnell/cpa-subscription-value/internal/api"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/config"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/pricing"
@@ -82,7 +83,7 @@ func TestRecomputeThenFitWeights(t *testing.T) {
 		t.Fatalf("estimates %v err %v", ests, err)
 	}
 	var at time.Time
-	if found, _ := st.GetSetting("last_recompute_1_7d", &at); !found || at.IsZero() {
+	if found, _ := st.GetSetting(api.RecomputeSettingKey("51a1c0de", domain.MeterSevenDay), &at); !found || at.IsZero() {
 		t.Fatal("last_recompute setting not written")
 	}
 
@@ -116,7 +117,7 @@ func TestRunDrainsDirtyMarks(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		var at time.Time
-		if found, _ := st.GetSetting("last_recompute_1_5h", &at); found {
+		if found, _ := st.GetSetting(api.RecomputeSettingKey("51a1c0de", domain.MeterFiveHour), &at); found {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

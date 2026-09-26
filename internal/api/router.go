@@ -71,12 +71,6 @@ func New(pluginID string, d Deps) *Router {
 	return &Router{pluginID: pluginID, d: d, now: time.Now}
 }
 
-// RecomputeSettingKey is where the app records when it last recomputed a
-// meter (value: a JSON time). /health reports it.
-func RecomputeSettingKey(authIndex, meterKey string) string {
-	return "last_recompute_" + authIndex + "_" + meterKey
-}
-
 const (
 	defaultLimit = 100
 	maxLimit     = 5000
@@ -271,7 +265,7 @@ func (r *Router) handleHealth(url.Values, []byte) abi.ManagementResponse {
 // lastRecompute reads RecomputeSettingKey, also accepting the account id in
 // place of the auth index.
 func (r *Router) lastRecompute(a domain.Account, meterKey string) (time.Time, bool) {
-	for _, k := range []string{RecomputeSettingKey(a.AuthIndex, meterKey), RecomputeSettingKey(strconv.FormatInt(a.ID, 10), meterKey)} {
+	for _, k := range []string{store.RecomputeSettingKey(a.AuthIndex, meterKey), store.RecomputeSettingKey(strconv.FormatInt(a.ID, 10), meterKey)} {
 		var at time.Time
 		if ok, err := r.d.Store.GetSetting(k, &at); err == nil && ok && !at.IsZero() {
 			return at.UTC(), true

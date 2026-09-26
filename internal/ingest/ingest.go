@@ -187,19 +187,21 @@ type familyRule struct {
 	repl string
 }
 
-// familyRules collapses dates and minor versions so that price snapshots and
-// weight fits key on the tier the vendor prices, not on the checkpoint.
+// familyRules strips dates and aliases but keeps the minor version, because
+// vendors price checkpoints differently (Opus 5.5 is $4/$20, Opus 5 $5/$25):
+// the family must be the unit the price table and the weight learner share.
 //
-//	claude-opus-5-5-20260301   -> claude-opus-5
-//	claude-sonnet-4-5-20250929 -> claude-sonnet-4
-//	claude-fable-5-1           -> claude-fable-5
+//	claude-opus-5-5-20260301   -> claude-opus-5-5
+//	claude-opus-5-20260101     -> claude-opus-5
+//	claude-sonnet-4-5-20250929 -> claude-sonnet-4-5
+//	claude-fable-5-1           -> claude-fable-5-1
 //	claude-3-5-haiku-20241022  -> claude-haiku-3   (legacy ordering)
 //	gpt-5.6-sol-2026-03-01     -> gpt-5.6-sol
 //	gpt-6-astra-latest         -> gpt-6-astra
 //	codex-spark                -> codex-spark
 var familyRules = map[domain.Provider][]familyRule{
 	domain.ProviderClaude: {
-		{regexp.MustCompile(`^(claude-(?:opus|sonnet|haiku|fable))-(\d+)(?:[-.].*)?$`), "$1-$2"},
+		{regexp.MustCompile(`^(claude-(?:opus|sonnet|haiku|fable))-(\d+(?:-\d{1,2})?)(?:-\d{8})?(?:-.*)?$`), "$1-$2"},
 		{regexp.MustCompile(`^(claude-(?:opus|sonnet|haiku|fable))(?:-.*)?$`), "$1"},
 		{regexp.MustCompile(`^claude-(\d+)(?:-\d+)?-(opus|sonnet|haiku)(?:-.*)?$`), "claude-$2-$1"},
 	},

@@ -346,3 +346,9 @@ func strListText(list []string) string {
 	raw, _ := json.Marshal(list)
 	return string(raw)
 }
+
+// RecomputeSettingKey names the setting holding when a meter's estimate was
+// last recomputed, keyed by the account's auth index.
+func RecomputeSettingKey(authIndex, meterKey string) string {
+	return "last_recompute_" + authIndex + "_" + meterKey
+}

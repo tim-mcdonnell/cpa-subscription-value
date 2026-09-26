@@ -50,6 +50,7 @@ static void free_host_buffer(void* ptr, size_t len) {
 import "C"
 
 import (
+	"encoding/json"
 	"errors"
 	"unsafe"
 
@@ -139,9 +140,10 @@ func (cgoHost) Call(method string, payload []byte) ([]byte, error) {
 		C.free_host_buffer(resp.ptr, resp.len)
 	}
 	if rc != 0 {
-		if len(out) > 0 {
-			// The host still returns an envelope on failure; let the caller decode it.
-			return out, nil
+		// The host may still return an error envelope; surface its message.
+		var env abi.Envelope
+		if json.Unmarshal(out, &env) == nil && env.Error != nil {
+			return nil, env.Error
 		}
 		return nil, errors.New("host call " + method + " failed")
 	}

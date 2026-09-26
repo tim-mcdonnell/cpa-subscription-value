@@ -334,3 +334,13 @@ This was measured during development over 60 seeds and all 5h cycles, with defau
 4. **`restart_gap` is plumbed but not wired.** `AnalyzeOptions.RestartGaps` exists, but nothing derives it yet from the `last_event_at` / `plugin_started_at` settings.
 5. **Weekly `v_blend` is only set on running estimates.** Finals store 0.
 6. **4-dp cycles.** The 5h cycles that fall entirely in the 4-dp era run at tick 1e-4, which yields thousands of one-event segments. V̂ stays correct and the lag becomes very identifiable, but block counts and grades behave differently from whole-percent cycles. No assertion covers this.
+
+## Post-review notes (2026-09-26)
+
+- **Model families keep the minor version** (`claude-opus-5-5`, `claude-fable-5-1`): vendors price checkpoints differently, and the family is the unit the price table, the by-family mix and the weight learner share. Dated ids still collapse (`claude-opus-5-5-20260301` → `claude-opus-5-5`).
+- **The time-lag input/output split and the by-type mix use the active price table** (`engine.priceSplit`), scaled to the event's frozen `api_usd`; `meter.RatioSplit` is only the fallback for unpriced models.
+- **The learner sees the estimator's eligible segments** (`estimate.Excludes`), with `low_usd` at half weight; informational flags such as `long_gap` no longer drop segments.
+- **Cross-checks are wired** in `engine.FitWeights`: `learner_divergence` when the learner's latest-cycle value is outside 2·SE of V̂, and `lag_unstable` when the learner's prequential backtest disagrees with the estimator's lag; stored under `weights_check_<auth_index>_<meter>`.
+- **`restart_gap` is wired** from `last_event_at` vs plugin start, with a 10-minute minimum idle span so ordinary quiet periods do not count.
+- **Dedup uses the host RequestID when present**, qualified by auth index and outcome; the token tuple is the fallback. This deviates from the plan's tuple-only rule so a stream that reports usage twice is not double counted.
+- **Not implemented, by choice:** `overage_active` (the semantics of `anthropic-ratelimit-unified-overage-status` are unverified; the raw header is kept in `headers_json`), `fable_feeds_7d` (current behaviour equals `auto`), per-family fast/long features for the learner, account relinking (see plan follow-ups).

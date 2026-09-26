@@ -291,12 +291,12 @@ func TestHealth(t *testing.T) {
 	if err := f.st.SetSetting(poll.SettingKey(claudeIdx), poll.Status{At: at, OK: true, Readings: 3, NextAt: at.Add(20 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.st.SetSetting(RecomputeSettingKey(claudeIdx, "7d"), at); err != nil {
+	if err := f.st.SetSetting(store.RecomputeSettingKey(claudeIdx, "7d"), at); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		f.st.DeleteSetting(poll.SettingKey(claudeIdx))
-		f.st.DeleteSetting(RecomputeSettingKey(claudeIdx, "7d"))
+		f.st.DeleteSetting(store.RecomputeSettingKey(claudeIdx, "7d"))
 	})
 	for _, path := range []string{prefix + "/health", "/v0/management" + prefix + "/health"} {
 		m := decode(t, get(r, path, nil))

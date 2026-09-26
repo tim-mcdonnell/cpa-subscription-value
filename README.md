@@ -17,7 +17,7 @@ Design: [`docs/plan.md`](docs/plan.md). Estimator as implemented, with measured 
 ## Limits you should know
 
 - **Unrouted usage lowers the number.** claude.ai web/desktop and Codex cloud tasks draw on the same allowance without passing through the proxy. Bursts are detected and excluded; steady background use is invisible and makes V̂ a floor. Set an account's coverage mode to `mixed` to hide capacity figures.
-- **Feature-scoped meters are not estimated.** `7d_oi`, `weekly_scoped:*` and Codex additional limits meter a subset of traffic; they are stored and charted, not regressed.
+- **Feature-scoped meters are estimated only with a scope.** Claude's Fable-scoped `7d_oi` is regressed against Fable-family events only; `weekly_scoped:*` and Codex additional limits are stored and charted, not regressed, unless a scope regex is configured for them.
 - **The provider's internal weighting is undisclosed.** "$ per 100%" is mix-specific by construction; it is reported with the mix, and the learner's factors say how far the meter departs from API pricing.
 - **Whole-percent readings.** Precision is derived per reading from the raw header string; a weekly cycle needs a few dozen ticks before the CI is tight.
 - **Claude cache writes** are priced at the 5-minute rate by default; the 1-hour rate is shown as a band (`v_hat_cw1h`) because CPA does not report the TTL.

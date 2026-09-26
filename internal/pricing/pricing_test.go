@@ -234,13 +234,12 @@ func TestSyncParsesFixture(t *testing.T) {
 	// Differently priced checkpoints keep their own row.
 	check(domain.ProviderClaude, "claude-opus-5-5", Rates{Input: 4, Output: 20, CacheRead: 0.2, CacheWrite5m: 5, CacheWrite1h: 8, FastMult: 2})
 	check(domain.ProviderClaude, "claude-fable-5-1", Rates{Input: 10, Output: 50, CacheRead: 0.25, CacheWrite5m: 12.5, CacheWrite1h: 20})
-	// No id equals claude-opus-4: max-priced member, all $5/$25.
-	check(domain.ProviderClaude, "claude-opus-4", Rates{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite5m: 6.25, CacheWrite1h: 10})
-	check(domain.ProviderClaude, "claude-sonnet-4", Rates{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite5m: 3.75, CacheWrite1h: 6})
-	for _, k := range []string{"claude-opus-4-5", "claude-opus-4-5-20251101", "claude-sonnet-4-6", "claude-opus-4-8"} {
-		if _, ok := tbl[Key{domain.ProviderClaude, k}]; ok {
-			t.Errorf("redundant row %s", k)
-		}
+	// Families keep their minor version, so each checkpoint has a row; a
+	// dated id collapses onto its checkpoint.
+	check(domain.ProviderClaude, "claude-opus-4-5", Rates{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite5m: 6.25, CacheWrite1h: 10})
+	check(domain.ProviderClaude, "claude-sonnet-4-6", Rates{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite5m: 3.75, CacheWrite1h: 6})
+	if _, ok := tbl[Key{domain.ProviderClaude, "claude-opus-4-5-20251101"}]; ok {
+		t.Errorf("dated id should collapse onto claude-opus-4-5")
 	}
 	// OpenAI: long-context tier multiplier, fast policy, dated variant.
 	check(domain.ProviderCodex, "gpt-5.5", Rates{Input: 5, Output: 30, CacheRead: 0.5, LongCtxMult: 2, FastMult: 2.5})

@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,9 +70,10 @@ func TestLifecycleRoundTrip(t *testing.T) {
 	mustEnvelope(t, a, abi.MethodUsageHandle, payload)
 
 	deadline := time.Now().Add(5 * time.Second)
-	for a.queued.Load() != 0 && time.Now().Before(deadline) {
+	for len(a.rt.Load().ingest) != 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
+	time.Sleep(50 * time.Millisecond) // let the writer finish the last record
 
 	mreq, _ := json.Marshal(abi.ManagementRequest{Method: "GET", Path: "/v0/management/" + PluginID + "/events", Query: map[string][]string{"auth_index": {"0a1b2c3d"}}})
 	res = mustEnvelope(t, a, abi.MethodManagementHandle, mreq)
@@ -132,4 +134,58 @@ func TestUsageBeforeRegisterIsDropped(t *testing.T) {
 	if a.dropped.Load() != 1 {
 		t.Fatalf("dropped %d", a.dropped.Load())
 	}
+}
+
+// Lifecycle calls interleaved with usage and management traffic must neither
+// race nor deadlock nor panic: the host runs all of them concurrently.
+func TestLifecycleConcurrency(t *testing.T) {
+	a := New("test", abi.NewHost(&recordingHost{}))
+	dirs := []string{t.TempDir(), t.TempDir()}
+	reg := func(i int) []byte {
+		b, _ := json.Marshal(abi.LifecycleRequest{SchemaVersion: 2, ConfigYAML: []byte("data_dir: " + dirs[i%2] + "\npoll_interval_minutes: 0\nprice_sync_hours: 0\n")})
+		return b
+	}
+	usage, _ := json.Marshal(map[string]any{"Provider": "codex", "Model": "gpt-5.6-sol", "AuthIndex": "c0dex", "RequestedAt": time.Now().Format(time.RFC3339Nano),
+		"Detail": map[string]int64{"InputTokens": 100, "OutputTokens": 10}, "ResponseHeaders": http.Header{"X-Codex-Primary-Used-Percent": {"12"}, "X-Codex-Primary-Window-Minutes": {"10080"}, "X-Codex-Primary-Reset-At": {"1790000000"}}})
+	mreq, _ := json.Marshal(abi.ManagementRequest{Method: "GET", Path: "/" + PluginID + "/health"})
+
+	stop := make(chan struct{})
+	time.AfterFunc(1500*time.Millisecond, func() { close(stop) })
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		for w := 0; w < 3; w++ {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				for i := 0; ; i++ {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					switch (i + w) % 5 {
+					case 0:
+						_, _ = a.Handle(abi.MethodPluginRegister, reg(i))
+					case 1:
+						_, _ = a.Handle(abi.MethodUsageHandle, usage)
+					case 2:
+						_, _ = a.Handle(abi.MethodManagementHandle, mreq)
+					case 3:
+						_ = a.Recompute(1, "7d")
+					case 4:
+						a.Shutdown()
+					}
+				}
+			}(w)
+		}
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("lifecycle deadlocked")
+	}
+	a.Shutdown()
 }

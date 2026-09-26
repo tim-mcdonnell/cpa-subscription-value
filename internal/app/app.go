@@ -1,5 +1,11 @@
 // Package app is the plugin's method dispatcher and lifecycle owner. The cgo
 // layer hands it (method, payload) pairs; it answers with envelopes.
+//
+// Lifecycle model: everything that depends on configuration lives in one
+// immutable runtime that register/reconfigure builds whole and swaps in
+// atomically. Request-path handlers read the current runtime pointer and
+// never take the lifecycle lock, so they cannot block behind a store open
+// or a reconfigure, and they never observe a half-applied config.
 package app
 
 import (
@@ -29,36 +35,39 @@ type App struct {
 	version string
 	host    *abi.Host
 
-	mu        sync.Mutex
-	cfg       config.Config
-	schema    uint32
-	store     *store.Store
-	router    *api.Router
-	pricer    ingest.Pricer
-	catalog   *pricing.Catalog
-	engine    *engine.Engine
-	poller    *poll.Poller
+	// lifecycle serializes register, reconfigure and Shutdown.
+	lifecycle sync.Mutex
+	rt        atomic.Pointer[runtime]
 	startedAt time.Time
+	schema    atomic.Uint32
 
-	// ingest is the hand-off between HandleUsage (must return fast) and the
-	// single writer goroutine.
-	ingest   chan domain.UsageRecord
-	writerWG sync.WaitGroup
-	stop     chan struct{}
-	running  bool
-
-	// background cancels the pollers and other periodic work.
-	background context.CancelFunc
-	bgWG       sync.WaitGroup
-
-	queued      atomic.Int64
 	dropped     atomic.Int64
 	lastEventNS atomic.Int64
 }
 
+// runtime is one configured instance: built whole, swapped in, torn down whole.
+type runtime struct {
+	cfg     config.Config
+	store   *store.Store
+	catalog *pricing.Catalog
+	engine  *engine.Engine
+	poller  *poll.Poller
+	router  *api.Router
+	pricer  ingest.Pricer
+
+	ingest chan domain.UsageRecord
+	// stop closes to tell the writer to drain and exit; writerDone closes
+	// when it has.
+	stop       chan struct{}
+	writerDone chan struct{}
+
+	bgCancel context.CancelFunc
+	bgWG     sync.WaitGroup
+}
+
 // New builds an App that is idle until plugin.register arrives.
 func New(version string, host *abi.Host) *App {
-	return &App{version: version, host: host, pricer: ingest.NoPricer{}}
+	return &App{version: version, host: host}
 }
 
 // Handle dispatches one ABI method.
@@ -108,147 +117,101 @@ func (a *App) register(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.schema = abi.NegotiateSchema(req.SchemaVersion)
-	if err := a.applyConfigLocked(cfg); err != nil {
+	a.schema.Store(abi.NegotiateSchema(req.SchemaVersion))
+	a.lifecycle.Lock()
+	defer a.lifecycle.Unlock()
+	if a.startedAt.IsZero() {
+		a.startedAt = time.Now()
+	}
+	old := a.rt.Load()
+	if old != nil && old.cfg == cfg {
+		return a.registrationResponse()
+	}
+	// The old runtime is stopped before the new store opens so two runtimes
+	// never hold the same database, and so a reconfigure is all-or-nothing.
+	a.rt.Store(nil)
+	a.teardown(old)
+	rt, err := a.build(cfg, old == nil)
+	if err != nil {
 		return nil, err
 	}
+	a.rt.Store(rt)
+	a.log("info", "plugin registered", map[string]any{"version": a.version, "schema": a.schema.Load(), "data_dir": cfg.DataDir})
+	return a.registrationResponse()
+}
+
+func (a *App) registrationResponse() ([]byte, error) {
 	return abi.OK(abi.Registration{
-		SchemaVersion: a.schema,
+		SchemaVersion: a.schema.Load(),
 		Metadata:      a.metadata(),
 		Capabilities:  abi.Capabilities{UsagePlugin: true, ManagementAPI: true},
 	})
 }
 
-// applyConfigLocked (re)opens the store when the data dir changes and starts
-// the writer. It is idempotent so reconfigure is safe.
-func (a *App) applyConfigLocked(cfg config.Config) error {
-	if a.store != nil && a.cfg.DataDir == cfg.DataDir {
-		a.cfg = cfg
-		a.stopBackgroundLocked()
-		a.catalog = pricing.NewCatalog(a.store, cfg, a.host, a.log)
-		if err := a.catalog.Load(); err != nil {
-			a.log("warn", "load price snapshot failed; using built-in table", map[string]any{"error": err.Error()})
-		}
-		a.pricer = a.catalog
-		a.router = api.New(PluginID, api.Deps{Store: a.store, Health: a.health, Catalog: a.catalog, Actions: a})
-		a.startBackgroundLocked()
-		return nil
-	}
-	if a.store != nil {
-		a.stopBackgroundLocked()
-		a.stopWriterLocked()
-		_ = a.store.Close()
-		a.store = nil
-	}
+// build opens the store and starts the writer and background work. It is
+// called with the lifecycle lock held and no runtime installed.
+func (a *App) build(cfg config.Config, firstStart bool) (*runtime, error) {
 	st, err := store.Open(dbPath(cfg.DataDir))
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return nil, fmt.Errorf("open store: %w", err)
 	}
-	a.cfg = cfg
-	a.store = st
-	a.catalog = pricing.NewCatalog(st, cfg, a.host, a.log)
-	if err := a.catalog.Load(); err != nil {
+	rt := &runtime{cfg: cfg, store: st}
+	rt.catalog = pricing.NewCatalog(st, cfg, a.host, a.log)
+	if err := rt.catalog.Load(); err != nil {
 		a.log("warn", "load price snapshot failed; using built-in table", map[string]any{"error": err.Error()})
 	}
-	a.pricer = a.catalog
-	a.router = api.New(PluginID, api.Deps{Store: st, Health: a.health, Catalog: a.catalog, Actions: a})
-	if a.startedAt.IsZero() {
-		a.startedAt = time.Now()
+	rt.pricer = rt.catalog
+	rt.engine = engine.New(st, rt.catalog, a.log, engine.Options{Retention: time.Duration(cfg.RetentionDays) * 24 * time.Hour})
+	if firstStart {
+		// Only the process start is a restart from the estimator's point of
+		// view; a reconfigure keeps the same process and loses nothing.
+		_ = st.SetSetting("plugin_started_at", a.startedAt)
+		rt.engine.RecordRestart(a.startedAt)
 	}
-	_ = st.SetSetting("plugin_started_at", a.startedAt)
-	a.engine = engine.New(st, a.catalog, a.log, engine.Options{Retention: time.Duration(cfg.RetentionDays) * 24 * time.Hour})
-	a.engine.RecordRestart(a.startedAt)
-	a.startWriterLocked()
-	a.startBackgroundLocked()
-	a.log("info", "plugin registered", map[string]any{"version": a.version, "schema": a.schema, "data_dir": cfg.DataDir})
-	return nil
-}
+	rt.router = api.New(PluginID, api.Deps{Store: st, Health: a.health, Catalog: rt.catalog, Actions: a})
 
-// dbPath ends in .db so the homelab's backup-verify, which only looks for
-// *.db files, includes it.
-func dbPath(dir string) string { return dir + "/subscription-value.db" }
+	rt.ingest = make(chan domain.UsageRecord, cfg.IngestBuffer)
+	rt.stop = make(chan struct{})
+	rt.writerDone = make(chan struct{})
+	go a.writer(rt)
 
-func (a *App) startWriterLocked() {
-	if a.running {
-		return
-	}
-	a.ingest = make(chan domain.UsageRecord, a.cfg.IngestBuffer)
-	a.stop = make(chan struct{})
-	a.running = true
-	a.writerWG.Add(1)
-	go a.writer(a.ingest, a.stop, a.store)
-}
-
-func (a *App) stopWriterLocked() {
-	if !a.running {
-		return
-	}
-	close(a.stop)
-	a.running = false
-	a.mu.Unlock()
-	a.writerWG.Wait()
-	a.mu.Lock()
-}
-
-// startBackgroundLocked launches the pollers and the price sync. Polling
-// needs a host (credentials come from it); price sync does not.
-func (a *App) startBackgroundLocked() {
-	if a.background != nil {
-		return
-	}
 	ctx, cancel := context.WithCancel(context.Background())
-	a.background = cancel
-	a.poller = nil
-	if a.host != nil && a.cfg.PollInterval() > 0 {
-		p := poll.New(a.store, a.host, a.log, a.cfg.PollInterval())
-		a.poller = p
-		a.bgWG.Add(1)
-		go func() {
-			defer a.bgWG.Done()
-			p.Run(ctx)
-		}()
+	rt.bgCancel = cancel
+	if a.host != nil && cfg.PollInterval() > 0 {
+		rt.poller = poll.New(st, a.host, a.log, cfg.PollInterval())
+		rt.bgWG.Add(1)
+		go func() { defer rt.bgWG.Done(); rt.poller.Run(ctx) }()
 	}
-	if eng := a.engine; eng != nil {
-		a.bgWG.Add(1)
-		go func() {
-			defer a.bgWG.Done()
-			eng.Run(ctx)
-		}()
+	rt.bgWG.Add(1)
+	go func() { defer rt.bgWG.Done(); rt.engine.Run(ctx) }()
+	if cfg.PriceSyncHours > 0 {
+		rt.bgWG.Add(1)
+		go func() { defer rt.bgWG.Done(); rt.catalog.RunSync(ctx, time.Duration(cfg.PriceSyncHours)*time.Hour) }()
 	}
-	if a.cfg.PriceSyncHours > 0 {
-		c := a.catalog
-		a.bgWG.Add(1)
-		go func() {
-			defer a.bgWG.Done()
-			c.RunSync(ctx, time.Duration(a.cfg.PriceSyncHours)*time.Hour)
-		}()
-	}
+	return rt, nil
 }
 
-func (a *App) stopBackgroundLocked() {
-	if a.background == nil {
+// teardown stops background work, drains the writer and closes the store.
+// Called with the lifecycle lock held after the runtime was uninstalled, so
+// no new usage records can reach it.
+func (a *App) teardown(rt *runtime) {
+	if rt == nil {
 		return
 	}
-	a.background()
-	a.background = nil
-	a.mu.Unlock()
-	a.bgWG.Wait()
-	a.mu.Lock()
+	rt.bgCancel()
+	rt.bgWG.Wait()
+	close(rt.stop)
+	<-rt.writerDone
+	_ = rt.store.Close()
 }
+
+func dbPath(dir string) string { return dir + "/subscription-value.db" }
 
 // Shutdown drains the ingest queue and closes the store. Safe to call twice.
 func (a *App) Shutdown() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.stopBackgroundLocked()
-	a.stopWriterLocked()
-	if a.store != nil {
-		_ = a.store.Close()
-		a.store = nil
-		a.router = nil
-	}
+	a.lifecycle.Lock()
+	defer a.lifecycle.Unlock()
+	a.teardown(a.rt.Swap(nil))
 }
 
 // usage answers usage.handle. It must not block: the host calls every usage
@@ -258,16 +221,13 @@ func (a *App) usage(payload []byte) ([]byte, error) {
 	if err := json.Unmarshal(payload, &rec); err != nil {
 		return nil, fmt.Errorf("decode usage record: %w", err)
 	}
-	a.mu.Lock()
-	ch, running := a.ingest, a.running
-	a.mu.Unlock()
-	if !running {
+	rt := a.rt.Load()
+	if rt == nil {
 		a.dropped.Add(1)
 		return abi.OK(struct{}{})
 	}
 	select {
-	case ch <- rec:
-		a.queued.Add(1)
+	case rt.ingest <- rec:
 	default:
 		a.dropped.Add(1)
 	}
@@ -275,17 +235,18 @@ func (a *App) usage(payload []byte) ([]byte, error) {
 }
 
 // writer is the only goroutine that touches the store from the ingest path.
-func (a *App) writer(ch <-chan domain.UsageRecord, stop <-chan struct{}, st *store.Store) {
-	defer a.writerWG.Done()
+// After stop it drains whatever is queued, so nothing accepted is lost.
+func (a *App) writer(rt *runtime) {
+	defer close(rt.writerDone)
 	for {
 		select {
-		case rec := <-ch:
-			a.persist(st, rec)
-		case <-stop:
+		case rec := <-rt.ingest:
+			a.persist(rt, rec)
+		case <-rt.stop:
 			for {
 				select {
-				case rec := <-ch:
-					a.persist(st, rec)
+				case rec := <-rt.ingest:
+					a.persist(rt, rec)
 				default:
 					return
 				}
@@ -294,13 +255,12 @@ func (a *App) writer(ch <-chan domain.UsageRecord, stop <-chan struct{}, st *sto
 	}
 }
 
-func (a *App) persist(st *store.Store, rec domain.UsageRecord) {
-	a.queued.Add(-1)
-	res, ok := ingest.Normalize(rec, a.pricer)
+func (a *App) persist(rt *runtime, rec domain.UsageRecord) {
+	res, ok := ingest.Normalize(rec, rt.pricer)
 	if !ok {
 		return
 	}
-	acct, err := st.UpsertAccount(domain.Account{
+	acct, err := rt.store.UpsertAccount(domain.Account{
 		Provider:  res.Provider,
 		AuthIndex: res.Event.AuthIndex,
 		AuthID:    res.Event.AuthID,
@@ -315,33 +275,30 @@ func (a *App) persist(st *store.Store, rec domain.UsageRecord) {
 	for i := range res.Readings {
 		res.Readings[i].AccountID = acct.ID
 	}
-	inserted, err := st.InsertEvent(&res.Event, res.Readings)
+	inserted, err := rt.store.InsertEvent(&res.Event, res.Readings)
 	if err != nil {
 		a.log("warn", "insert event failed", map[string]any{"error": err.Error(), "dedup_key": res.Event.DedupKey})
 		return
 	}
-	if inserted {
-		a.lastEventNS.Store(res.Event.ObservedAt.UnixNano())
-		if eng := a.engine; eng != nil {
-			eng.NoteEvent(res.Event.ObservedAt)
-			for _, r := range res.Readings {
-				eng.MarkDirty(acct.ID, r.MeterKey)
-			}
-		}
-		if a.cfg.LogLevel == "debug" {
-			a.log("debug", "event recorded", map[string]any{"provider": res.Provider, "model": res.Event.Model, "meters": len(res.Readings)})
-		}
+	if !inserted {
+		return
+	}
+	a.lastEventNS.Store(res.Event.ObservedAt.UnixNano())
+	rt.engine.NoteEvent(res.Event.ObservedAt)
+	for _, r := range res.Readings {
+		rt.engine.MarkDirty(acct.ID, r.MeterKey)
+	}
+	if rt.cfg.LogLevel == "debug" {
+		a.log("debug", "event recorded", map[string]any{"provider": res.Provider, "model": res.Event.Model, "meters": len(res.Readings)})
 	}
 }
 
 func (a *App) registration() abi.ManagementRegistration {
-	a.mu.Lock()
-	r := a.router
-	a.mu.Unlock()
-	if r == nil {
+	rt := a.rt.Load()
+	if rt == nil {
 		return abi.ManagementRegistration{}
 	}
-	return r.Registration()
+	return rt.router.Registration()
 }
 
 func (a *App) management(payload []byte) ([]byte, error) {
@@ -349,90 +306,84 @@ func (a *App) management(payload []byte) ([]byte, error) {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, fmt.Errorf("decode management request: %w", err)
 	}
-	a.mu.Lock()
-	r := a.router
-	a.mu.Unlock()
-	if r == nil {
+	rt := a.rt.Load()
+	if rt == nil {
 		return abi.OK(abi.ErrorResponse(503, "plugin not registered"))
 	}
-	return abi.OK(r.Handle(req))
+	return abi.OK(rt.router.Handle(req))
 }
 
 func (a *App) health() api.Health {
-	a.mu.Lock()
-	cfg, schema, started := a.cfg, a.schema, a.startedAt
-	a.mu.Unlock()
+	var cfg any
+	var queued int64
+	if rt := a.rt.Load(); rt != nil {
+		cfg = rt.cfg
+		queued = int64(len(rt.ingest))
+	}
 	var last time.Time
 	if ns := a.lastEventNS.Load(); ns > 0 {
 		last = time.Unix(0, ns)
 	}
 	return api.Health{
 		PluginVersion: a.version,
-		SchemaVersion: schema,
-		StartedAt:     started,
-		IngestQueued:  a.queued.Load(),
+		SchemaVersion: a.schema.Load(),
+		StartedAt:     a.startedAt,
+		IngestQueued:  queued,
 		IngestDropped: a.dropped.Load(),
 		LastEventAt:   last,
 		Config:        cfg,
 	}
 }
 
-// Actions exposed to the management API. Each one is synchronous.
+// Actions exposed to the management API. Each works on the runtime current
+// at the call. A reconfigure during a long call tears the old runtime down
+// underneath it; the call then fails with a closed-store error, which the
+// API reports, rather than the host crashing.
+
+var errNotRegistered = fmt.Errorf("plugin not registered")
 
 // Recompute runs the estimator for one meter now.
 func (a *App) Recompute(accountID int64, meterKey string) error {
-	a.mu.Lock()
-	eng := a.engine
-	a.mu.Unlock()
-	if eng == nil {
-		return fmt.Errorf("plugin not registered")
+	rt := a.rt.Load()
+	if rt == nil {
+		return errNotRegistered
 	}
-	return eng.Recompute(accountID, meterKey)
+	return rt.engine.Recompute(accountID, meterKey)
 }
 
 // PollNow runs one poll round and returns its summary.
 func (a *App) PollNow(ctx context.Context) (any, error) {
-	a.mu.Lock()
-	p := a.poller
-	a.mu.Unlock()
-	if p == nil {
+	rt := a.rt.Load()
+	if rt == nil {
+		return nil, errNotRegistered
+	}
+	if rt.poller == nil {
 		return nil, fmt.Errorf("polling is disabled or no host is attached")
 	}
-	return p.PollOnce(ctx), nil
+	return rt.poller.PollOnce(ctx), nil
 }
 
 // SyncPrices fetches models.dev now.
 func (a *App) SyncPrices(ctx context.Context) (bool, error) {
-	a.mu.Lock()
-	c := a.catalog
-	a.mu.Unlock()
-	if c == nil {
-		return false, fmt.Errorf("plugin not registered")
+	rt := a.rt.Load()
+	if rt == nil {
+		return false, errNotRegistered
 	}
-	return c.SyncNow(ctx)
+	return rt.catalog.SyncNow(ctx)
 }
 
 // Reprice recomputes stored costs under the active price table.
 func (a *App) Reprice(ctx context.Context) (int64, error) {
-	a.mu.Lock()
-	c, st := a.catalog, a.store
-	a.mu.Unlock()
-	if c == nil || st == nil {
-		return 0, fmt.Errorf("plugin not registered")
+	rt := a.rt.Load()
+	if rt == nil {
+		return 0, errNotRegistered
 	}
-	return c.Reprice(ctx, st, 500)
+	return rt.catalog.Reprice(ctx, rt.store, pricing.DefaultRepriceBatch)
 }
 
-// Reconfigured restarts the background schedulers after a settings change.
-func (a *App) Reconfigured() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.store == nil {
-		return
-	}
-	a.stopBackgroundLocked()
-	a.startBackgroundLocked()
-}
+// Reconfigured is called after a settings change through the API. Settings
+// live in the store and are read on use, so nothing needs restarting.
+func (a *App) Reconfigured() {}
 
 func (a *App) log(level, msg string, fields map[string]any) {
 	if a.host == nil {

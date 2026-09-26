@@ -19,9 +19,9 @@ func openai(in, out float64) Price {
 // Prices is the built-in table keyed by model family. Only consistency
 // matters: the generator and Pricer read the same numbers.
 var Prices = map[string]Price{
-	"claude-opus-5":    anthropic(4, 20),
+	"claude-opus-5-5":  anthropic(4, 20),
 	"claude-sonnet-5":  anthropic(2, 10),
-	"claude-fable-5":   anthropic(10, 50),
+	"claude-fable-5-1": anthropic(10, 50),
 	"gpt-5.6-sol":      openai(1.25, 10),
 	"gpt-5.6-sol-mini": openai(0.25, 2),
 }

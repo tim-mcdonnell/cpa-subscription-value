@@ -8,11 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/tim-mcdonnell/cpa-subscription-value/internal/api"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/domain"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/estimate"
 	"github.com/tim-mcdonnell/cpa-subscription-value/internal/meter"
@@ -140,12 +141,14 @@ func (e *Engine) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			e.flush(ctx, true)
+			// Dirty marks are dropped, not flushed: a recompute has no
+			// cancellation point and would hold up quiesce. The sweep on
+			// the next start marks every meter again.
 			return
 		case <-e.wake:
 		case <-tick.C:
 		}
-		e.flush(ctx, false)
+		e.flush(ctx)
 		now := time.Now()
 		if now.After(weightsAt) {
 			e.fitAll(ctx)
@@ -173,13 +176,12 @@ func (e *Engine) sweep() {
 	}
 }
 
-// flush recomputes every dirty meter whose last mark is older than the
-// debounce; force recomputes all of them.
-func (e *Engine) flush(ctx context.Context, force bool) {
+// flush recomputes every dirty meter whose last mark is older than the debounce.
+func (e *Engine) flush(ctx context.Context) {
 	e.mu.Lock()
 	var due []dirtyKey
 	for k, t := range e.dirty {
-		if force || time.Since(t) >= e.opts.Debounce {
+		if time.Since(t) >= e.opts.Debounce {
 			due = append(due, k)
 			delete(e.dirty, k)
 		}
@@ -192,7 +194,7 @@ func (e *Engine) flush(ctx context.Context, force bool) {
 		return due[i].meter < due[j].meter
 	})
 	for _, k := range due {
-		if ctx.Err() != nil && !force {
+		if ctx.Err() != nil {
 			return
 		}
 		if err := e.Recompute(k.account, k.meter); err != nil {
@@ -205,6 +207,10 @@ func (e *Engine) flush(ctx context.Context, force bool) {
 func (e *Engine) Recompute(accountID int64, meterKey string) error {
 	o := estimate.DefaultAnalyzeOptions()
 	o.RestartGaps = e.gaps
+	if e.catalog != nil {
+		table, _ := e.catalog.Active()
+		o.Split = priceSplit(table)
+	}
 	key := fmt.Sprint(accountID)
 	if acct, ok, _ := e.st.GetAccount(accountID); ok && acct.AuthIndex != "" {
 		o.Series = acct.AuthIndex
@@ -213,7 +219,7 @@ func (e *Engine) Recompute(accountID int64, meterKey string) error {
 	if err := estimate.RecomputeWith(e.st, accountID, meterKey, time.Now(), o); err != nil {
 		return err
 	}
-	return e.st.SetSetting(api.RecomputeSettingKey(key, meterKey), time.Now())
+	return e.st.SetSetting(store.RecomputeSettingKey(key, meterKey), time.Now())
 }
 
 func (e *Engine) fitAll(ctx context.Context) {
@@ -246,37 +252,100 @@ func (e *Engine) FitWeights(acct domain.Account, meterKey string) error {
 	if len(cycles) == 0 {
 		return fmt.Errorf("no cycles")
 	}
-	lag := latestLag(e.st, acct.ID, meterKey)
-	var segs []weights.Segment
+	est, lag := latestEstimate(e.st, acct.ID, meterKey)
+	byLag := map[string][]weights.Segment{}
 	for _, c := range cycles {
-		rows, err := e.st.ListSegments(c.ID, lag)
-		if err != nil {
-			return err
+		for _, l := range meter.Lags {
+			rows, err := e.st.ListSegments(c.ID, string(l))
+			if err != nil {
+				return err
+			}
+			byLag[string(l)] = append(byLag[string(l)], adaptSegments(c, rows)...)
 		}
-		segs = append(segs, adaptSegments(c, rows)...)
 	}
+	segs := byLag[lag]
 	if len(segs) == 0 {
 		return fmt.Errorf("no segments")
 	}
 	table, hash := e.catalog.Active()
 	params := weights.DefaultParams(acct.Provider, table)
-	fit, err := weights.FitWeights(segs, params, time.Now())
+	now := time.Now()
+	fit, err := weights.FitWeights(segs, params, now)
 	if err != nil {
 		return err
 	}
 	fit.Lag = lag
+	best, mae, ambiguous := weights.Backtest(byLag, params, now)
+	fit.Backtest, fit.LagAmbiguous = mae, ambiguous
 	row := fit.ToStore(acct.ID, meterKey, hash)
 	if err := e.st.InsertWeightFit(&row); err != nil {
 		return err
 	}
-	return e.st.SetSetting(fmt.Sprintf("%s%d_%s", settingLastWeights, acct.ID, meterKey), time.Now())
+	// Plan §Weight learner: the learner's own V for the latest cycle is
+	// cross-checked against V̂ (learner_divergence outside 2·SE) and its
+	// backtest lag against the estimator's (lag_unstable on disagreement).
+	chk := Check{ComputedAt: now, EstimateLag: lag, BacktestLag: best, BacktestMAE: mae, LagAmbiguous: ambiguous}
+	if n := len(fit.Scales); n > 0 {
+		chk.LearnerValue = fit.Scales[n-1].ValuePer100
+	}
+	if est != nil {
+		chk.EstimateValue, chk.EstimateSE = est.VHat, math.Hypot(est.SEQuant, est.SEBoot)
+		chk.Divergence = chk.LearnerValue > 0 && est.VHat > 0 && math.Abs(chk.LearnerValue-est.VHat) > 2*chk.EstimateSE
+		chk.LagDisagreement = best != "" && !ambiguous && best != lag
+	}
+	if err := e.st.SetSetting(CheckSettingKey(acct.AuthIndex, meterKey), chk); err != nil {
+		return err
+	}
+	return e.st.SetSetting(fmt.Sprintf("%s%d_%s", settingLastWeights, acct.ID, meterKey), now)
 }
 
-// latestLag is the lag the newest estimate for the meter used; "time" when none.
-func latestLag(st *store.Store, accountID int64, meterKey string) string {
+// priceSplit apportions an event's frozen api_usd across token types by the
+// active price table, so the time-lag registration and the by-type mix use
+// the same prices ingest did. Unknown models fall back to list-price ratios.
+func priceSplit(table pricing.Table) meter.SplitFunc {
+	return func(ev domain.UsageEvent) meter.TypeUSD {
+		r, _, ok := table.Lookup(ev.Provider, ev.Model)
+		if !ok {
+			return meter.RatioSplit(ev)
+		}
+		u := float64(ev.UncachedInput) * r.Input
+		cr := float64(ev.CacheRead) * r.CacheRead
+		cw := float64(ev.CacheWrite) * r.CacheWrite5m
+		o := float64(ev.Output) * r.Output
+		sum := u + cr + cw + o
+		if sum <= 0 {
+			return meter.TypeUSD{UncachedInput: ev.APIUSD}
+		}
+		f := ev.APIUSD / sum
+		return meter.TypeUSD{UncachedInput: u * f, CacheRead: cr * f, CacheWrite: cw * f, Output: o * f}
+	}
+}
+
+// Check is the learner-vs-estimator cross-check stored per meter.
+type Check struct {
+	ComputedAt      time.Time          `json:"computed_at"`
+	LearnerValue    float64            `json:"learner_value_per_100"`
+	EstimateValue   float64            `json:"estimate_v_hat"`
+	EstimateSE      float64            `json:"estimate_se"`
+	Divergence      bool               `json:"learner_divergence"`
+	EstimateLag     string             `json:"estimate_lag"`
+	BacktestLag     string             `json:"backtest_lag,omitempty"`
+	BacktestMAE     map[string]float64 `json:"backtest_mae,omitempty"`
+	LagAmbiguous    bool               `json:"lag_ambiguous"`
+	LagDisagreement bool               `json:"lag_unstable"`
+}
+
+// CheckSettingKey names the stored cross-check for a meter.
+func CheckSettingKey(authIndex, meterKey string) string {
+	return "weights_check_" + authIndex + "_" + meterKey
+}
+
+// latestEstimate is the newest estimate for the meter and the lag it used;
+// nil and "time" when none exists yet.
+func latestEstimate(st *store.Store, accountID int64, meterKey string) (*store.Estimate, string) {
 	ests, err := st.LatestEstimatesPerCycle(accountID, meterKey)
 	if err != nil || len(ests) == 0 {
-		return string(meter.LagTime)
+		return nil, string(meter.LagTime)
 	}
 	newest := ests[0]
 	for _, x := range ests[1:] {
@@ -285,9 +354,9 @@ func latestLag(st *store.Store, accountID int64, meterKey string) string {
 		}
 	}
 	if newest.Lag == "" {
-		return string(meter.LagTime)
+		return &newest, string(meter.LagTime)
 	}
-	return newest.Lag
+	return &newest, newest.Lag
 }
 
 // segmentFeatures mirrors estimate's features_json.
@@ -295,25 +364,20 @@ type segmentFeatures struct {
 	Tokens map[string]meter.TokenCounts `json:"tokens"`
 }
 
-// adaptSegments turns stored segments into learner input. Segments with
-// exclusion flags are dropped, except low_usd ones, which the learner
-// down-weights. Fast/long are aggregate counts on the segment, not per
-// family, so features carry neither flag; the learner's fast/long factors
-// stay at their priors until per-family counts exist.
+// adaptSegments turns stored segments into learner input using the
+// estimator's eligibility rule; low_usd segments stay in at half weight
+// (the boundary weight is not persisted). Fast/long are aggregate counts on
+// the segment, not per family, so features carry neither flag; the learner's
+// fast/long factors stay at their priors until per-family counts exist.
 func adaptSegments(c store.Cycle, rows []store.Segment) []weights.Segment {
 	out := make([]weights.Segment, 0, len(rows))
 	for _, r := range rows {
-		weight := 1.0
-		skip := false
-		for _, f := range r.Flags {
-			if f == "low_usd" {
-				weight = 0.5
-			} else {
-				skip = true
-			}
-		}
-		if skip || r.DeltaTicks <= 0 {
+		if estimate.Excludes(r.Flags) || r.DeltaTicks <= 0 {
 			continue
+		}
+		weight := 1.0
+		if slices.Contains(r.Flags, meter.FlagLowUSD) {
+			weight = 0.5
 		}
 		var fs segmentFeatures
 		if err := json.Unmarshal(r.Features, &fs); err != nil || len(fs.Tokens) == 0 {

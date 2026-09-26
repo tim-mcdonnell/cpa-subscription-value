@@ -83,7 +83,7 @@ func TestClaudeWireDecodeAndNormalize(t *testing.T) {
 		ObservedAt:      rec.RequestedAt.Add(1200 * time.Millisecond),
 		Latency:         8500 * time.Millisecond,
 		Model:           "claude-opus-5-5-20260301",
-		ModelFamily:     "claude-opus-5",
+		ModelFamily:     "claude-opus-5-5",
 		Alias:           "opus",
 		ServiceTier:     "priority",
 		ReasoningEffort: "high",
@@ -166,7 +166,7 @@ func TestNormalizeTable(t *testing.T) {
 				},
 			},
 			want: want{
-				provider: domain.ProviderClaude, family: "claude-fable-5",
+				provider: domain.ProviderClaude, family: "claude-fable-5-1",
 				observed: at.Add(400 * time.Millisecond), flags: domain.FlagZeroTokens, status: 429,
 				readings: []domain.MeterReading{
 					{MeterKey: "5h", UsedFraction: 0, Raw: "0.00", PrecisionDP: 2, WindowSec: 18000},
@@ -189,7 +189,7 @@ func TestNormalizeTable(t *testing.T) {
 				},
 			},
 			want: want{
-				provider: domain.ProviderClaude, family: "claude-sonnet-4", observed: at,
+				provider: domain.ProviderClaude, family: "claude-sonnet-4-5", observed: at,
 				uncached: 1000, cacheRead: 250_000, cacheWr: 5, output: 10,
 				flags: domain.FlagTotalMismatch, fast: true, long: true,
 				readings: []domain.MeterReading{
@@ -305,7 +305,7 @@ func TestNormalizeTable(t *testing.T) {
 				},
 			},
 			want: want{
-				provider: domain.ProviderClaude, family: "claude-haiku-4", observed: at,
+				provider: domain.ProviderClaude, family: "claude-haiku-4-5", observed: at,
 				uncached: 1, output: 1,
 				readings: []domain.MeterReading{
 					{MeterKey: "30d", UsedFraction: 0.2, Raw: "0.2", PrecisionDP: 1, Status: "allowed", WindowSec: 30 * 86400},
@@ -432,11 +432,11 @@ func TestModelFamily(t *testing.T) {
 		model string
 		want  string
 	}{
-		{domain.ProviderClaude, "claude-opus-5-5-20260301", "claude-opus-5"},
+		{domain.ProviderClaude, "claude-opus-5-5-20260301", "claude-opus-5-5"},
 		{domain.ProviderClaude, "claude-opus-5", "claude-opus-5"},
-		{domain.ProviderClaude, "claude-sonnet-4-5-20250929", "claude-sonnet-4"},
-		{domain.ProviderClaude, "claude-fable-5-1", "claude-fable-5"},
-		{domain.ProviderClaude, "Claude-Haiku-4-5-20251001", "claude-haiku-4"},
+		{domain.ProviderClaude, "claude-sonnet-4-5-20250929", "claude-sonnet-4-5"},
+		{domain.ProviderClaude, "claude-fable-5-1", "claude-fable-5-1"},
+		{domain.ProviderClaude, "Claude-Haiku-4-5-20251001", "claude-haiku-4-5"},
 		{domain.ProviderClaude, "claude-3-5-sonnet-20241022", "claude-sonnet-3"},
 		{domain.ProviderClaude, "claude-opus-latest", "claude-opus"},
 		{domain.ProviderClaude, "some-gateway-model", "some-gateway-model"},

@@ -29,6 +29,7 @@ type Catalog struct {
 	hash  string
 
 	syncMu         sync.Mutex
+	repriceMu      sync.Mutex
 	firstSyncDelay time.Duration
 }
 
@@ -171,6 +172,10 @@ func (c *Catalog) Reprice(ctx context.Context, st *store.Store, batch int) (int6
 	if st == nil {
 		return 0, fmt.Errorf("pricing: reprice: no store")
 	}
+	// One reprice at a time: a run under an older hash must not overwrite
+	// rows a newer run already repriced.
+	c.repriceMu.Lock()
+	defer c.repriceMu.Unlock()
 	if batch <= 0 {
 		batch = DefaultRepriceBatch
 	}

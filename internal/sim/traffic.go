@@ -31,9 +31,9 @@ var models = map[domain.Provider][]struct {
 	share         float64
 }{
 	domain.ProviderClaude: {
-		{"claude-opus-5-5", "claude-opus-5", 0.55},
+		{"claude-opus-5-5", "claude-opus-5-5", 0.55},
 		{"claude-sonnet-5", "claude-sonnet-5", 0.30},
-		{"claude-fable-5-1", "claude-fable-5", 0.15},
+		{"claude-fable-5-1", "claude-fable-5-1", 0.15},
 	},
 	domain.ProviderCodex: {
 		{"gpt-5.6-sol", "gpt-5.6-sol", 0.8},

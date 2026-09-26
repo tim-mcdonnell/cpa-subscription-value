@@ -81,7 +81,7 @@ func DefaultScenario(seed uint64, p domain.Provider) Scenario {
 		Cycles:   4,
 		V7dLo:    200, V7dHi: 600,
 		V5hRatio:        0.15,
-		FamilyMult:      map[string]float64{"claude-fable-5": 1.2, "gpt-5.6-sol-mini": 0.8},
+		FamilyMult:      map[string]float64{"claude-fable-5-1": 1.2, "gpt-5.6-sol-mini": 0.8},
 		TypeMult:        map[string]float64{TypeUncachedInput: 1, TypeCacheRead: 0.5, TypeCacheWrite: 1, TypeOutput: 1},
 		LagMode:         LagTime,
 		BetaMode:        BetaGaps,

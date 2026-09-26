@@ -70,6 +70,12 @@ const (
 // unexplained_frac.
 var excluded = []string{meter.FlagQuotaDrop, meter.FlagRegimeChange, meter.FlagRestartGap, meter.FlagLagIncomplete, meter.FlagCoverageGap}
 
+// Excludes reports whether any of the flags keeps a segment out of V̂; the
+// weight learner uses the same rule so both see the same segments.
+func Excludes(flags []string) bool {
+	return slices.ContainsFunc(flags, func(f string) bool { return slices.Contains(excluded, f) })
+}
+
 // Mix is the $ share of the used segments by model family and token type.
 type Mix struct {
 	ByFamily map[string]float64 `json:"by_family"`
